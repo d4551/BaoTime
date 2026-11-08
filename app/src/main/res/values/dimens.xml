@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- BaoTime's Android spacing, typography, visual icon and touch-target scale. -->
+    <dimen name="space_xs">4dp</dimen>
+    <dimen name="space_sm">8dp</dimen>
+    <dimen name="space_md">12dp</dimen>
+    <dimen name="space_lg">16dp</dimen>
+    <dimen name="space_xl">20dp</dimen>
+    <dimen name="radius_control">24dp</dimen>
+    <dimen name="text_size_title">26sp</dimen>
+    <dimen name="text_size_heading">17sp</dimen>
+    <dimen name="text_size_body">15sp</dimen>
+    <dimen name="text_size_control">14sp</dimen>
+    <dimen name="text_size_caption">12sp</dimen>
+    <dimen name="icon_size">24dp</dimen>
+    <dimen name="info_size">24dp</dimen>
+    <dimen name="min_touch_target">48dp</dimen>
+    <dimen name="hairline">1dp</dimen>
+    <dimen name="focus_ring">2dp</dimen>
+    <dimen name="glass_blur_radius">28dp</dimen>
+    <dimen name="sheet_grabber_width">32dp</dimen>
+    <dimen name="sheet_grabber_height">4dp</dimen>
+    <dimen name="call_control_size">72dp</dimen>
+    <dimen name="call_control_icon_size">32dp</dimen>
+</resources>

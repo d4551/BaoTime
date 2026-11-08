@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Neutral content surfaces; green is reserved for primary actions and meaning. -->
+    <color name="color_bg">#FFF5F7F6</color>
+    <color name="color_bg_top">#FFFFFFFF</color>
+    <color name="color_surface">#FFFFFFFF</color>
+    <color name="color_surface_high">#FFEDF1EE</color>
+    <color name="color_stroke">#FFD3DCD6</color>
+    <color name="bao_green">#FF087535</color>
+    <color name="bao_green_dark">#FF075A2A</color>
+    <color name="color_on_accent">#FFFFFFFF</color>
+    <color name="color_text_primary">#FF17201A</color>
+    <color name="color_text_secondary">#FF4E5B52</color>
+    <color name="color_text_hint">#FF5B6A60</color>
+    <color name="color_call_text">#FFF2FFF6</color>
+    <color name="color_call_text_secondary">#FFB4C5BA</color>
+    <color name="color_scrim">#8C0A100C</color>
+    <color name="color_danger">#FFC62E35</color>
+    <color name="color_warning">#FF805300</color>
+    <color name="color_call_chrome">#FF131B16</color>
+    <color name="color_glass_bar">#B3FFFFFF</color>
+    <color name="color_glass_sheet">#E6FFFFFF</color>
+    <color name="color_glass_call_bar">#80131B16</color>
+    <color name="color_glass_edge">#330D2818</color>
+    <color name="color_chrome_fallback">@color/color_surface</color>
+    <color name="color_control_disabled_bg">#FFE0E6E2</color>
+    <color name="color_control_disabled_text">#FF526158</color>
+    <color name="color_control_focus">#FF246CC2</color>
+    <color name="color_control_selected_outline">#FF185B32</color>
+    <color name="color_control_ripple">#3317201A</color>
+    <color name="color_control_clear">#00000000</color>
+    <color name="color_control_mask">#FFFFFFFF</color>
+</resources>

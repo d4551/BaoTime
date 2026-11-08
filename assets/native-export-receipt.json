@@ -1,0 +1,41 @@
+{
+  "application": "/Applications/Xcode.app/Contents/Applications/Icon Composer.app",
+  "method": "Native File > Export > iOS > All, 1024pt at2x via Computer Use",
+  "inputs": [
+    {
+      "path": "assets/BaoTime.icon/icon.json",
+      "sha256": "84bc3c2a71791d8a7f04d5701a51dc1aa7cfe1572541ecacc36c5827cf21f0d6"
+    },
+    {
+      "path": "assets/BaoTime.icon/Assets/camera-mark.svg",
+      "sha256": "be270f71fc7e825c6c7ae52077ae28944642494a1dba18090b33c40c4dd6e6bb"
+    }
+  ],
+  "exports": [
+    {
+      "path": "assets/BaoTime Exports/BaoTime-iOS-ClearDark-1024@2x.png",
+      "sha256": "62c31c82b66fc27283a8d426d46eb144c643d7e6cf87874598952de12a259e6d"
+    },
+    {
+      "path": "assets/BaoTime Exports/BaoTime-iOS-ClearLight-1024@2x.png",
+      "sha256": "7352188d3bfc7d810ee1dc410a18b79f3b259f2ea853a4f17a259220390d19af"
+    },
+    {
+      "path": "assets/BaoTime Exports/BaoTime-iOS-Dark-1024@2x.png",
+      "sha256": "1a70df1f25e46c4af97e2f5ab8fa9c8ab4fbb1c940d5da8767a2785b1c9cdaa9"
+    },
+    {
+      "path": "assets/BaoTime Exports/BaoTime-iOS-Default-1024@2x.png",
+      "sha256": "cd26bfa2324984f939bd13646512e785ebd444226c79be4f900cdb844f96caa4"
+    },
+    {
+      "path": "assets/BaoTime Exports/BaoTime-iOS-TintedDark-1024@2x.png",
+      "sha256": "8f09795d7ba4cd2f3ba39390780dfe582d92468ffdf532e04828c11208f6631a"
+    },
+    {
+      "path": "assets/BaoTime Exports/BaoTime-iOS-TintedLight-1024@2x.png",
+      "sha256": "f7bf1801cae136d040c1597a40b4e1b654675555d2a82ce269896ed8982610e6"
+    }
+  ],
+  "limitations": "Static rendered appearances; Android does not run Apple Liquid Glass or native dynamic lighting."
+}

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="foreground_surface_state" type="id" />
+    <item name="room_share" type="id" />
+    <item name="room_speaker" type="id" />
+    <item name="room_pip" type="id" />
+    <item name="room_reload" type="id" />
+    <item name="screen_title" type="id" />
+    <item name="tab_recents" type="id" />
+    <item name="tab_contacts" type="id" />
+</resources>

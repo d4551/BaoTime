@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">BaoTime</string>
+
+    <!-- Server status -->
+    <string name="banner_checking">Checking BlueBubbles Server &amp; FaceTime helper…</string>
+    <string name="banner_connected">Connected to your Mac</string>
+    <string name="banner_unreachable_password">BlueBubbles Server unreachable: server password not set (enter it in Settings)</string>
+    <string name="banner_unreachable_url">BlueBubbles Server unreachable: server URL not configured (see Settings tab)</string>
+    <string name="banner_unreachable_rejected">BlueBubbles Server unreachable: server URL was rejected (see Settings tab)</string>
+    <string name="banner_unreachable_http">BlueBubbles Server unreachable: the server refused the request (see Settings tab)</string>
+    <string name="banner_unreachable_unknown">BlueBubbles Server status is unavailable.</string>
+    <string name="banner_credentials_unavailable">Stored BlueBubbles password could not be read. Enter it again in Settings.</string>
+
+    <!-- Shared actions and navigation -->
+    <string name="input_label">Phone, Email or FaceTime Link</string>
+    <string name="input_hint">name@example.com</string>
+    <string name="desc_new_call">New Call</string>
+    <string name="recents_caption_fmt">%1$s • %2$s</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_copy">Copy Link</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_clear_history">Clear History</string>
+    <string name="clear_history_title">Clear Call History?</string>
+    <string name="clear_history_body">This permanently deletes all recent calls.</string>
+    <string name="link_copied">Link copied</string>
+    <string name="action_speaker">Speaker</string>
+    <string name="action_share">Share</string>
+    <string name="tab_recents">Recents</string>
+    <string name="tab_contacts">Contacts</string>
+    <string name="tab_setup">Settings</string>
+    <string name="state_loading">Loading…</string>
+    <string name="error_generic">Something failed. Check Settings and try again.</string>
+    <string name="desc_dismiss_sheet">Close sheet; drag down or tap</string>
+    <string name="desc_close_sheet">Close sheet</string>
+    <string name="desc_sheet">Sheet</string>
+
+    <!-- Recents -->
+    <string name="recents_empty">No BaoTime calls yet. Tap New Call to start one.</string>
+    <string name="call_type_incoming">Link received</string>
+    <string name="call_type_outgoing">Link opened</string>
+    <string name="call_type_missed">Unanswered</string>
+    <string name="call_duration_fmt"> • Session %1$s</string>
+
+    <!-- Contacts -->
+    <string name="contacts_denied">Contacts access is off.</string>
+    <string name="contacts_empty">No contacts yet.</string>
+    <string name="contacts_grant">Open Contacts Permission Settings</string>
+    <string name="contacts_imessage_header">iMessage Contacts</string>
+    <string name="contacts_favorites_header">Favorites</string>
+    <string name="contacts_device_header">On This Device</string>
+    <string name="contacts_search_label">Search Contacts</string>
+    <string name="contacts_search_hint">Name, phone or email</string>
+    <plurals name="contacts_show_all">
+        <item quantity="one">Show All (%1$d More)</item>
+        <item quantity="other">Show All (%1$d More)</item>
+    </plurals>
+    <string name="contacts_sync_offline">Mac contacts unavailable</string>
+    <string name="contacts_no_matches">No matches.</string>
+    <string name="contact_action_facetime">Create FaceTime Link</string>
+    <string name="contact_action_dial">Dial With Phone App</string>
+    <string name="contact_action_favorite">Add To Favorites</string>
+    <string name="contact_action_unfavorite">Remove From Favorites</string>
+    <string name="dialer_title">New Call</string>
+    <string name="desc_facetime_call">Create FaceTime Link</string>
+    <string name="desc_join_call">Join Call</string>
+    <string name="desc_share_link">Share FaceTime Link</string>
+    <string name="contact_kind_phone_fmt">Phone: %1$s</string>
+    <string name="contact_kind_email_fmt">Apple ID / Email: %1$s</string>
+
+    <!-- Link creation and room -->
+    <string name="call_generating">Generating FaceTime link via BlueBubbles Server…</string>
+    <string name="call_create_failed">Could not create a FaceTime link</string>
+    <string name="default_call_label">FaceTime Call</string>
+    <string name="link_label">FaceTime Link</string>
+    <string name="new_link_label">New FaceTime Link</string>
+    <string name="call_status_connecting">Loading FaceTime…</string>
+    <string name="call_status_page_ready">Room open</string>
+    <string name="call_status_navigation_blocked">Only secure FaceTime rooms can open here.</string>
+    <string name="call_pip_unavailable">Picture in picture is unavailable.</string>
+    <string name="call_status_failed">Call failed</string>
+    <string name="call_status_media_waiting">Continue to camera and microphone permissions</string>
+    <string name="call_status_media_granted">Camera and microphone allowed for this call</string>
+    <string name="action_allow">Continue</string>
+    <string name="call_speaker_unavailable">Speaker route is unavailable.</string>
+    <string name="desc_end_call">Close room</string>
+    <string name="desc_pip">Picture in picture</string>
+    <string name="desc_retry_call">Reload the call room</string>
+    <string name="action_create_link">Create FaceTime Link</string>
+    <string name="action_join_link">Join FaceTime Link</string>
+    <string name="new_call_explanation">Create a link, then share it.</string>
+    <string name="call_more_actions">Room options</string>
+
+    <!-- Incoming invitations -->
+    <string name="incoming_calls_channel">Incoming FaceTime calls</string>
+    <string name="incoming_call_title">FaceTime invitation</string>
+    <string name="action_accept">Accept</string>
+    <string name="action_decline">Decline</string>
+    <string name="desc_accept_call">Accept incoming call</string>
+    <string name="desc_decline_call">Decline incoming call</string>
+    <string name="incoming_call_body_fmt">%1$s — tap to answer in BaoTime</string>
+
+    <!-- Settings -->
+    <string name="desc_open_setup">Open Settings</string>
+    <string name="setup_configure">FaceTime Links</string>
+    <string name="setup_incoming_configure">Incoming Invitations</string>
+    <string name="setup_open_settings_failed_fmt">Could not open settings: %1$s</string>
+    <string name="setup_config_title">Mac Connection</string>
+    <string name="setup_server_url_label">Server Address</string>
+    <string name="setup_server_url_hint">https://your-server:1234</string>
+    <string name="setup_password_label">Server Password</string>
+    <string name="setup_password_hint">BlueBubbles password</string>
+    <string name="setup_password_note">Password encrypted on this device.</string>
+    <string name="setup_save">Save Connection</string>
+    <string name="setup_saved">Saved</string>
+    <string name="setup_url_invalid">Enter a valid server URL starting with http:// or https://</string>
+    <string name="setup_password_unavailable">Stored password could not be read. Enter your BlueBubbles password again and save.</string>
+    <string name="setup_status_unavailable">Unavailable</string>
+    <string name="setup_links_enabled">Opens in BaoTime</string>
+    <string name="setup_links_disabled">Choose BaoTime in Android settings</string>
+    <string name="setup_incoming_enabled">On</string>
+    <string name="setup_incoming_disabled">Off</string>
+    <string name="setup_saved_offline">Saved · Mac unavailable</string>
+    <string name="setup_saved_connected">Saved · Connected</string>
+    <string name="action_cancel_speaker_switch">Cancel speaker switch</string>
+</resources>

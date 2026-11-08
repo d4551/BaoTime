@@ -1,0 +1,386 @@
+{
+  "inputs": [
+    {
+      "path": "assets/BaoTime.icon/icon.json",
+      "sha256": "84bc3c2a71791d8a7f04d5701a51dc1aa7cfe1572541ecacc36c5827cf21f0d6"
+    },
+    {
+      "path": "assets/BaoTime.icon/Assets/camera-mark.svg",
+      "sha256": "be270f71fc7e825c6c7ae52077ae28944642494a1dba18090b33c40c4dd6e6bb"
+    },
+    {
+      "path": "assets/BaoTime Exports/BaoTime-iOS-ClearDark-1024@2x.png",
+      "sha256": "62c31c82b66fc27283a8d426d46eb144c643d7e6cf87874598952de12a259e6d"
+    },
+    {
+      "path": "assets/BaoTime Exports/BaoTime-iOS-ClearLight-1024@2x.png",
+      "sha256": "7352188d3bfc7d810ee1dc410a18b79f3b259f2ea853a4f17a259220390d19af"
+    },
+    {
+      "path": "assets/BaoTime Exports/BaoTime-iOS-Dark-1024@2x.png",
+      "sha256": "1a70df1f25e46c4af97e2f5ab8fa9c8ab4fbb1c940d5da8767a2785b1c9cdaa9"
+    },
+    {
+      "path": "assets/BaoTime Exports/BaoTime-iOS-Default-1024@2x.png",
+      "sha256": "cd26bfa2324984f939bd13646512e785ebd444226c79be4f900cdb844f96caa4"
+    },
+    {
+      "path": "assets/BaoTime Exports/BaoTime-iOS-TintedDark-1024@2x.png",
+      "sha256": "8f09795d7ba4cd2f3ba39390780dfe582d92468ffdf532e04828c11208f6631a"
+    },
+    {
+      "path": "assets/BaoTime Exports/BaoTime-iOS-TintedLight-1024@2x.png",
+      "sha256": "f7bf1801cae136d040c1597a40b4e1b654675555d2a82ce269896ed8982610e6"
+    },
+    {
+      "path": "assets/native-export-receipt.json",
+      "sha256": "549d6a36596e02ea1e0e9534d335b07de16ea4c8ff8c622addba87db2a002c43"
+    },
+    {
+      "path": "scripts/render_icon_previews.py",
+      "sha256": "add5f875b99e72332794c273845bb58a35418b727545175377af6f5c6cd05644"
+    }
+  ],
+  "generator": {
+    "path": "scripts/render_android_icons.py",
+    "sha256": "e13840fce791657b5ca36f28eb1e6cf793dd0ec49b0c927a8316dff4ae3be325"
+  },
+  "imageMagick": "Version: ImageMagick 7.1.2-34 Q16-HDRI aarch64 c5d4ca8a0:20261014 https://imagemagick.org",
+  "outputs": [
+    {
+      "path": "app/src/main/res/mipmap-hdpi/ic_launcher.png",
+      "sha256": "a146d744d2dfd537c2e8655290fed2688d28fe13dad71858b3311224bd8c231a",
+      "appearance": "light",
+      "kind": "ic_launcher",
+      "width": 72,
+      "height": 72
+    },
+    {
+      "path": "app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png",
+      "sha256": "49b09ee6f5074018d63509565cdf53420671d2867f29a92070a1a7d91738e595",
+      "appearance": "light",
+      "kind": "ic_launcher_foreground",
+      "width": 162,
+      "height": 162,
+      "alphaRadius": 47.900939447989956,
+      "safeRadius": 49.5
+    },
+    {
+      "path": "app/src/main/res/mipmap-hdpi/ic_launcher_monochrome.png",
+      "sha256": "9e5e071bab91b8d7836921d3d3a1b8a861b2c60e0009a3cb5f27c86b1c192fa0",
+      "appearance": "light",
+      "kind": "ic_launcher_monochrome",
+      "width": 162,
+      "height": 162,
+      "alphaRadius": 47.900939447989956,
+      "safeRadius": 49.5
+    },
+    {
+      "path": "app/src/main/res/mipmap-hdpi/ic_launcher_round.png",
+      "sha256": "46502ddc530affd86128f79009f80db2fb4a1b872022dd321727a59281a688b6",
+      "appearance": "light",
+      "kind": "ic_launcher_round",
+      "width": 72,
+      "height": 72
+    },
+    {
+      "path": "app/src/main/res/mipmap-mdpi/ic_launcher.png",
+      "sha256": "a5693deee2a55a25bf3cdc2b0ab70fac96376d96ff93c4fcc53b1782727f2fad",
+      "appearance": "light",
+      "kind": "ic_launcher",
+      "width": 48,
+      "height": 48
+    },
+    {
+      "path": "app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png",
+      "sha256": "240ea965cfa3f26b18a53fcf539b6d9a8bb295eea3567fb27f978357fa4d10ee",
+      "appearance": "light",
+      "kind": "ic_launcher_foreground",
+      "width": 108,
+      "height": 108,
+      "alphaRadius": 32.101401838549044,
+      "safeRadius": 33.0
+    },
+    {
+      "path": "app/src/main/res/mipmap-mdpi/ic_launcher_monochrome.png",
+      "sha256": "9d84b26c17e280c9209e7b4b60e7d907d779fe5f5993bae14a5a583bfe9776ef",
+      "appearance": "light",
+      "kind": "ic_launcher_monochrome",
+      "width": 108,
+      "height": 108,
+      "alphaRadius": 32.101401838549044,
+      "safeRadius": 33.0
+    },
+    {
+      "path": "app/src/main/res/mipmap-mdpi/ic_launcher_round.png",
+      "sha256": "66c8762e06d7c79e8bec6d4ad8d500788ee8ca7818a719863ecabd2ba85255ab",
+      "appearance": "light",
+      "kind": "ic_launcher_round",
+      "width": 48,
+      "height": 48
+    },
+    {
+      "path": "app/src/main/res/mipmap-night-hdpi/ic_launcher.png",
+      "sha256": "7c61d2b14606d630aad23bdf83152a90534d4bd2b2b03d97a6c13d59b2b231de",
+      "appearance": "dark",
+      "kind": "ic_launcher",
+      "width": 72,
+      "height": 72
+    },
+    {
+      "path": "app/src/main/res/mipmap-night-hdpi/ic_launcher_foreground.png",
+      "sha256": "02f56d4d2b122f4407fd8c664a33ea26983e95b1842113536e0308a465a57ce1",
+      "appearance": "dark",
+      "kind": "ic_launcher_foreground",
+      "width": 162,
+      "height": 162,
+      "alphaRadius": 47.900939447989956,
+      "safeRadius": 49.5
+    },
+    {
+      "path": "app/src/main/res/mipmap-night-hdpi/ic_launcher_round.png",
+      "sha256": "98d4fe3925ce9478bdfbcfb9f0764ed3b99f4a70d489acd0d0ce0a7e083ade4b",
+      "appearance": "dark",
+      "kind": "ic_launcher_round",
+      "width": 72,
+      "height": 72
+    },
+    {
+      "path": "app/src/main/res/mipmap-night-mdpi/ic_launcher.png",
+      "sha256": "995e3bb9b6337678e7bf51e0a4952d4250a1639533ad97b27db79fd6ac6c9e1f",
+      "appearance": "dark",
+      "kind": "ic_launcher",
+      "width": 48,
+      "height": 48
+    },
+    {
+      "path": "app/src/main/res/mipmap-night-mdpi/ic_launcher_foreground.png",
+      "sha256": "e2b19f961983d812e864f959ec40c618306ae87ba78d13c3f9f98aa16af7ed20",
+      "appearance": "dark",
+      "kind": "ic_launcher_foreground",
+      "width": 108,
+      "height": 108,
+      "alphaRadius": 32.101401838549044,
+      "safeRadius": 33.0
+    },
+    {
+      "path": "app/src/main/res/mipmap-night-mdpi/ic_launcher_round.png",
+      "sha256": "a0e409d8148317d7f473696eb88bf9c25d9f118460215325d929d4677d7160d9",
+      "appearance": "dark",
+      "kind": "ic_launcher_round",
+      "width": 48,
+      "height": 48
+    },
+    {
+      "path": "app/src/main/res/mipmap-night-xhdpi/ic_launcher.png",
+      "sha256": "1ff3c4535c50d6291163777ab6005f730208151442d8d24fb2136ef67ea32974",
+      "appearance": "dark",
+      "kind": "ic_launcher",
+      "width": 96,
+      "height": 96
+    },
+    {
+      "path": "app/src/main/res/mipmap-night-xhdpi/ic_launcher_foreground.png",
+      "sha256": "34e8597523a94f9e64be33c7eb040223005668bf20bb8640f9048322ad69baa2",
+      "appearance": "dark",
+      "kind": "ic_launcher_foreground",
+      "width": 216,
+      "height": 216,
+      "alphaRadius": 63.50196847342608,
+      "safeRadius": 66.0
+    },
+    {
+      "path": "app/src/main/res/mipmap-night-xhdpi/ic_launcher_round.png",
+      "sha256": "b70ec309f379d77510578ce749ddc96a70045478edc91b22fc7ac5fb3c9fa182",
+      "appearance": "dark",
+      "kind": "ic_launcher_round",
+      "width": 96,
+      "height": 96
+    },
+    {
+      "path": "app/src/main/res/mipmap-night-xxhdpi/ic_launcher.png",
+      "sha256": "d8fe58e6ed31d87099db30e92077a19435b33ff7e9b9898f2b559a4227762b2c",
+      "appearance": "dark",
+      "kind": "ic_launcher",
+      "width": 144,
+      "height": 144
+    },
+    {
+      "path": "app/src/main/res/mipmap-night-xxhdpi/ic_launcher_foreground.png",
+      "sha256": "5a74efa9408eb7180ddcca3149b4ad048ccfc2a8ccb0d8d16780f030352a5c92",
+      "appearance": "dark",
+      "kind": "ic_launcher_foreground",
+      "width": 324,
+      "height": 324,
+      "alphaRadius": 94.9025816297955,
+      "safeRadius": 99.0
+    },
+    {
+      "path": "app/src/main/res/mipmap-night-xxhdpi/ic_launcher_round.png",
+      "sha256": "8d4a38588709ea43d0b60ff12b8d3cf53badaf220d89742f4770780987bdb824",
+      "appearance": "dark",
+      "kind": "ic_launcher_round",
+      "width": 144,
+      "height": 144
+    },
+    {
+      "path": "app/src/main/res/mipmap-night-xxxhdpi/ic_launcher.png",
+      "sha256": "afaf09d0ab45f9d7ce96ff0ff584b54fb858455811292f187fdddddd02c7ab5e",
+      "appearance": "dark",
+      "kind": "ic_launcher",
+      "width": 192,
+      "height": 192
+    },
+    {
+      "path": "app/src/main/res/mipmap-night-xxxhdpi/ic_launcher_foreground.png",
+      "sha256": "c8dc2684766137f074c5bc048e916924ed8922f040d9416b8e2d34daaa0904bf",
+      "appearance": "dark",
+      "kind": "ic_launcher_foreground",
+      "width": 432,
+      "height": 432,
+      "alphaRadius": 126.43773171011887,
+      "safeRadius": 132.0
+    },
+    {
+      "path": "app/src/main/res/mipmap-night-xxxhdpi/ic_launcher_round.png",
+      "sha256": "e1b349c054ec206fe306250bb222fc8c30c2c95d2770e84a5bd04e0609f8bd9a",
+      "appearance": "dark",
+      "kind": "ic_launcher_round",
+      "width": 192,
+      "height": 192
+    },
+    {
+      "path": "app/src/main/res/mipmap-xhdpi/ic_launcher.png",
+      "sha256": "aea538eef1f0c531202632542bcdfe7861dac22579a5bb6c180e599b3013fe98",
+      "appearance": "light",
+      "kind": "ic_launcher",
+      "width": 96,
+      "height": 96
+    },
+    {
+      "path": "app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png",
+      "sha256": "5335f46022dd0b9ce4f5184aa8cf4cf5c1eaa0beeeb97ccfde9af06cd6348094",
+      "appearance": "light",
+      "kind": "ic_launcher_foreground",
+      "width": 216,
+      "height": 216,
+      "alphaRadius": 63.50196847342608,
+      "safeRadius": 66.0
+    },
+    {
+      "path": "app/src/main/res/mipmap-xhdpi/ic_launcher_monochrome.png",
+      "sha256": "6766bc23af80811ea752a761152cbf9426bfcec17660483241d6c1c084acbdcd",
+      "appearance": "light",
+      "kind": "ic_launcher_monochrome",
+      "width": 216,
+      "height": 216,
+      "alphaRadius": 63.50196847342608,
+      "safeRadius": 66.0
+    },
+    {
+      "path": "app/src/main/res/mipmap-xhdpi/ic_launcher_round.png",
+      "sha256": "ac814bf18c2c90e501fab99f63fc6dff43c7c72a367851843b53d0037702f8ed",
+      "appearance": "light",
+      "kind": "ic_launcher_round",
+      "width": 96,
+      "height": 96
+    },
+    {
+      "path": "app/src/main/res/mipmap-xxhdpi/ic_launcher.png",
+      "sha256": "5446199ee17041f3f783f90aec18ca8a630c646327272c0a8e17ed29ce3b8aec",
+      "appearance": "light",
+      "kind": "ic_launcher",
+      "width": 144,
+      "height": 144
+    },
+    {
+      "path": "app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png",
+      "sha256": "be78769f4fa607c7eaf36fdb05a315224b69e622f36193bf6a944906b64de72e",
+      "appearance": "light",
+      "kind": "ic_launcher_foreground",
+      "width": 324,
+      "height": 324,
+      "alphaRadius": 94.9025816297955,
+      "safeRadius": 99.0
+    },
+    {
+      "path": "app/src/main/res/mipmap-xxhdpi/ic_launcher_monochrome.png",
+      "sha256": "57eb3a78af5bf0117edcaddd26faf9b1f562ef03b03b61c641cb43ebed597a07",
+      "appearance": "light",
+      "kind": "ic_launcher_monochrome",
+      "width": 324,
+      "height": 324,
+      "alphaRadius": 94.9025816297955,
+      "safeRadius": 99.0
+    },
+    {
+      "path": "app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png",
+      "sha256": "8c6655ad6723d2e91ef12cff3c330153059115a189e54b08ebeb8a5c00be74ea",
+      "appearance": "light",
+      "kind": "ic_launcher_round",
+      "width": 144,
+      "height": 144
+    },
+    {
+      "path": "app/src/main/res/mipmap-xxxhdpi/ic_launcher.png",
+      "sha256": "c4a3c00ecc73ab80ebdb62f3df155a886a9fd1b6d24c79d062dd79471e22eb04",
+      "appearance": "light",
+      "kind": "ic_launcher",
+      "width": 192,
+      "height": 192
+    },
+    {
+      "path": "app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png",
+      "sha256": "d84ce61a512a3509121fd69a5e52b3834b5492e01b82119749f0e58a39d0de62",
+      "appearance": "light",
+      "kind": "ic_launcher_foreground",
+      "width": 432,
+      "height": 432,
+      "alphaRadius": 126.43773171011887,
+      "safeRadius": 132.0
+    },
+    {
+      "path": "app/src/main/res/mipmap-xxxhdpi/ic_launcher_monochrome.png",
+      "sha256": "98cc34ad74321859b7131b728f1884eba00cea03183e367f9a6a1a93af50bd7f",
+      "appearance": "light",
+      "kind": "ic_launcher_monochrome",
+      "width": 432,
+      "height": 432,
+      "alphaRadius": 126.43773171011887,
+      "safeRadius": 132.0
+    },
+    {
+      "path": "app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png",
+      "sha256": "82b2f74dfa34f52c1752ac96833d5c6e4b25506fecbe84e731d50ae9b132ccdc",
+      "appearance": "light",
+      "kind": "ic_launcher_round",
+      "width": 192,
+      "height": 192
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_launcher_background.xml",
+      "sha256": "b333f3963913fcb24e383818b414f4f5a8a5da2a413b1d50a5dfbe146580388c",
+      "appearance": "light",
+      "kind": "background",
+      "width": 108,
+      "height": 108
+    },
+    {
+      "path": "app/src/main/res/drawable-night/ic_launcher_background.xml",
+      "sha256": "e7d626eeb47328b0a4e50242b5375e5953e23cb2b4620920cffe07d37f7ac4d7",
+      "appearance": "dark",
+      "kind": "background",
+      "width": 108,
+      "height": 108
+    },
+    {
+      "path": "assets/baotime_icon_512.png",
+      "sha256": "228e10d89f47b977977d6af14e3ffc9c167a20fd03f880b92d2c59c98d3b976d",
+      "appearance": "light",
+      "kind": "review",
+      "width": 512,
+      "height": 512
+    }
+  ],
+  "limitations": "Static native material pixels within exact source alpha. Outside shadows and dynamic Apple refraction are not reproduced."
+}
