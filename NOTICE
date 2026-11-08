@@ -1,0 +1,30 @@
+# BaoTime — Third-Party Dependency & Upstream Reference Inventory
+
+This document records the SPDX licence identifiers, upstream `NOTICE` status, and attribution/obligation notes for upstream API references and third-party Gradle dependencies used by BaoTime (`com.baotime.app`).
+
+## Upstream API & Event References (Zero Source Files Copied)
+
+BaoTime is an independent Kotlin/Android View implementation of a FaceTime-web client for a personal BlueBubbles Mac server. No Flutter/Dart (`lib/…`), Kotlin plugin (`android/app/src/main/kotlin/com/bluebubbles/messaging/…`), or macOS helper source files from BlueBubbles are copied into this repository. Only public HTTP REST route paths, Socket.IO event names, and JSON payload field names are referenced. This engineering approach is not a certified legal clean-room process.
+
+| Upstream Artifact | Pinned Ref | SPDX Licence | Upstream `NOTICE` at Pin | Copied Files | Obligations |
+| --- | --- | --- | --- | --- | --- |
+| `BlueBubblesApp/bluebubbles-app` | `v2.1.5+android.95` (`ff8bfd5a57a8c6686c50d7b7b03d4ef8a5bded11`) | `Apache-2.0` | None (404) | 0 | API/event reference only; if any source file is ever copied in a future change, include full Apache-2.0 `LICENSE` text and per-file change notices in that same change. |
+| `BlueBubblesApp/bluebubbles-server` | `v1.9.12` (`76d2b2e786c04d7516de089f31be978a68da8083`) | `Apache-2.0` | None (404) | 0 | REST/Socket.IO schema reference only; if any source file is ever copied in a future change, include full Apache-2.0 `LICENSE` text and per-file change notices in that same change. |
+| `BlueBubblesApp/bluebubbles-helper` | `0.0.21` | `Apache-2.0` | None (404) | 0 | macOS-side helper only; never bundled or linked in Android. |
+
+## Gradle Dependencies (Runtime & Test)
+
+| Coordinate | Version | Scope | SPDX Licence | Upstream `NOTICE` | Transitive Runtime/Test Dependencies & Licences |
+| --- | --- | --- | --- | --- | --- |
+| `io.socket:socket.io-client` | `2.1.2` | `implementation` | `MIT` | None | `io.socket:engine.io-client:2.1.0` (`MIT`), `org.json:json` (The JSON License), `com.squareup.okhttp3:okhttp` (`Apache-2.0`) |
+| `com.squareup.okhttp3:okhttp` | `5.5.1` | `implementation` | `Apache-2.0` | None | `com.squareup.okhttp3:okhttp-jvm:5.5.1` (`Apache-2.0`), `com.squareup.okio:okio:3.16.2` / `okio-jvm:3.16.2` (`Apache-2.0`), `org.jetbrains.kotlin:kotlin-stdlib` (`Apache-2.0`) |
+| `androidx.core:core-ktx` | `1.19.1` | `implementation` | `Apache-2.0` | `NOTICE.txt` (in AAR) | AndroidX Core / Annotation (`Apache-2.0`) |
+| `androidx.activity:activity-ktx` | `1.13.0` | `implementation` | `Apache-2.0` | `NOTICE.txt` (in AAR) | AndroidX Activity / Lifecycle / SavedState (`Apache-2.0`) |
+| `androidx.lifecycle:lifecycle-runtime-ktx` | `2.11.0` | `implementation` | `Apache-2.0` | `NOTICE.txt` (in AAR) | AndroidX Lifecycle / Arch Core (`Apache-2.0`) |
+| `org.jetbrains.kotlinx:kotlinx-coroutines-android` | `1.11.0` | `implementation` | `Apache-2.0` | `NOTICE.txt` (in JAR) | `kotlinx-coroutines-core-jvm:1.11.0` (`Apache-2.0`) |
+| `com.squareup.okhttp3:mockwebserver` | `5.5.1` | `testImplementation` | `Apache-2.0` | None | `com.squareup.okhttp3:mockwebserver3:5.5.1` (`Apache-2.0`), `com.squareup.okhttp3:mockwebserver3-junit4:5.5.1` (`Apache-2.0`), `junit:junit:4.13.2` (`EPL-1.0`) |
+| `junit:junit` | `4.13.2` | `testImplementation` | `EPL-1.0` | None | `org.hamcrest:hamcrest-core:1.3` (`BSD-3-Clause`) |
+| `org.json:json` | `20260814` | `testImplementation` | `JSON` | None | None |
+| `androidx.test:runner` | `1.7.0` | `androidTestImplementation` | `Apache-2.0` | `NOTICE.txt` (in AAR) | AndroidX Test Monitor / Services (`Apache-2.0`) |
+| `androidx.test.ext:junit` | `1.3.0` | `androidTestImplementation` | `Apache-2.0` | `NOTICE.txt` (in AAR) | AndroidX Test Core / JUnit (`Apache-2.0`/`EPL-1.0`) |
+| `androidx.test.uiautomator:uiautomator` | `2.4.1` | `androidTestImplementation` | `Apache-2.0` | `NOTICE.txt` (in AAR) | AndroidX Test (`Apache-2.0`) |

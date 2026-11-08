@@ -50,9 +50,9 @@ object UrlRouter {
 
     /** Canonical room entry; credentials, custom ports and non-HTTPS URLs are rejected. */
     fun isFaceTimeRoomUrl(value: String): Boolean {
-        val uri = value.toUri()
-        return uri.scheme == SCHEME_HTTPS && isFacetimeHost(uri.host) &&
-            uri.userInfo == null && (uri.port == -1 || uri.port == 443)
+        val parts = webUrlParts(value) ?: return false
+        return parts.scheme == SCHEME_HTTPS && isFacetimeHost(parts.host) &&
+            (parts.port == null || parts.port == 443) && parts.pathAndQuery != "/"
     }
 
     fun isAppleMediaHost(host: String?): Boolean {

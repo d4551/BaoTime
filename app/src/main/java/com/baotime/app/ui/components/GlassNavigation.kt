@@ -56,7 +56,6 @@ class GlassNavigation(
     }
 }
 
-@Suppress("DEPRECATION")
 private class GlassSurfaceDrawable(
     private val theme: BaoTimeTheme,
     private val tintColor: Int,

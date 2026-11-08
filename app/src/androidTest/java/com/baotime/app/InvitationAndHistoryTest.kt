@@ -8,6 +8,7 @@ import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import com.baotime.app.call.IncomingCallListenerService
+import com.baotime.app.call.IncomingPushReceiver
 import java.io.File
 import org.junit.Assert.*
 import org.junit.Before
@@ -77,6 +78,19 @@ class InvitationAndHistoryTest {
         assertNotNull(device.wait(Until.findObject(By.text(context.getString(R.string.recents_empty))), 5000))
         assertFalse(device.findObject(By.desc(context.getString(R.string.action_clear_history))).isEnabled)
         capture("history-cleared-fixture-only")
+    }
+
+    @Test fun unifiedPushIngressRoutesIntoCallLifecycle() {
+        val payload = """{"type":"ft-call-status-changed","data":{"uuid":"audit-push-uuid-1","status_id":4,"status":"Incoming Call","handle":{"address":"Audit Push"}}}"""
+        context.sendBroadcast(Intent(context, IncomingPushReceiver::class.java).apply {
+            action = IncomingPushReceiver.ACTION_UNIFIED_PUSH_MESSAGE
+            putExtra(IncomingPushReceiver.EXTRA_MESSAGE, payload)
+        })
+        assertNotNull(device.wait(Until.findObject(By.text("Audit Push")), 5000))
+        assertNotNull(device.wait(Until.findObject(By.desc(context.getString(R.string.desc_accept_call))), 5000))
+        capture("incoming-unified-push")
+        device.findObject(By.desc(context.getString(R.string.desc_decline_call))).click()
+        assertTrue(device.wait(Until.gone(By.desc(context.getString(R.string.desc_accept_call))), 5000))
     }
 
     private fun invitation(id: String, title: String) {

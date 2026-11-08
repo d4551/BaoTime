@@ -67,4 +67,17 @@ class UrlRouterTest {
         assertTrue(UrlRouter.isFacetimeHost("FaceTime.Apple.Com"))
         assertFalse(UrlRouter.isFacetimeHost("facetime.apple.com.evil.com"))
     }
+
+    @Test
+    fun isFaceTimeRoomUrl_acceptsCanonicalRoomsAndRejectsRootCredentialsPortsSchemesAndLookalikes() {
+        assertTrue(UrlRouter.isFaceTimeRoomUrl("https://facetime.apple.com/join#v=1&p=abc&k=def"))
+        assertTrue(UrlRouter.isFaceTimeRoomUrl("https://facetime.apple.com:443/join#v=1&p=abc&k=def"))
+        assertFalse(UrlRouter.isFaceTimeRoomUrl("https://facetime.apple.com/"))
+        assertFalse(UrlRouter.isFaceTimeRoomUrl("https://facetime.apple.com"))
+        assertFalse(UrlRouter.isFaceTimeRoomUrl("https://facetime.apple.com.evil.invalid/join"))
+        assertFalse(UrlRouter.isFaceTimeRoomUrl("https://user:secret@facetime.apple.com/join"))
+        assertFalse(UrlRouter.isFaceTimeRoomUrl("https://facetime.apple.com:444/join"))
+        assertFalse(UrlRouter.isFaceTimeRoomUrl("http://facetime.apple.com/join"))
+        assertFalse(UrlRouter.isFaceTimeRoomUrl("javascript:alert(1)"))
+    }
 }

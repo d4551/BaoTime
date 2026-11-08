@@ -1,6 +1,6 @@
 # Implementation Plan: Ingest useful BlueBubbles FaceTime client behaviour into BaoTime
 
-Retrieval date: **2026-11-08**. **Documentation only.** No application code, Gradle, or tests in this change.
+Retrieval date: **2026-11-08**. Reconciled with [`tasks/workstreams/baotime-workstream-addendum.md`](workstreams/baotime-workstream-addendum.md) and implemented across Tasks 1–14 (`WS-A` through `WS-G`).
 
 Companion docs: [`README.md`](README.md) (index) · [`todo.md`](todo.md) · [`audit-resolution.md`](audit-resolution.md). Repository README: [`../README.md`](../README.md).
 
@@ -39,7 +39,6 @@ Do **not** become an iMessage client. Do **not** add unsupported Apple FaceTime 
 - Claiming `remoteMessaging` or `dataSync` Play eligibility for a FaceTime signaling socket.
 - Blocking generic `POST /facetime/session` on callee availability.
 - Certified accessibility, HIG, or runtime certification.
-- Merging this PR or writing `/Users/brandon/Downloads/facetime_android`.
 
 ## Upstream pins (verified 2026-11-08)
 
@@ -96,6 +95,19 @@ BaoTime currently has **no licence file**. That is not a grant to ignore Apache-
 
 **Transitive NOTICE:** adding OkHttp, Socket.IO Java, or FCM later requires recording **those** libraries’ licences (OkHttp Apache-2.0; confirm Socket.IO Java at add time) in Task 14 **before** copy or new third-party code lands. Do not claim “certified clean-room” in README or PRs.
 
+### Task 14: Licence and NOTICE inventory (completed)
+
+Root [`NOTICE`](../NOTICE) records the upstream provenance and third-party dependency licence inventory prior to landing Socket.IO Java and OkHttp:
+
+| Artifact / Dependency | Coordinate / Commit Pin | SPDX Licence | NOTICE at Pin | BaoTime Action |
+| --- | --- | --- | --- | --- |
+| BlueBubbles Android / Desktop client | `ff8bfd5a57a8c6686c50d7b7b03d4ef8a5bded11` (`v2.1.5+android.95`) | Apache-2.0 | None (`404`) | **Zero source files copied.** Public REST routes and Socket.IO event schemas only. |
+| BlueBubbles Server | `76d2b2e786c04d7516de089f31be978a68da8083` (`v1.9.12`) | Apache-2.0 | None (`404`) | **Zero source files copied.** Contract reference only. |
+| BlueBubbles Helper | `0.0.21` | Apache-2.0 | None (`404`) | **Zero source files copied.** macOS-only helper. |
+| Socket.IO Java client | `io.socket:socket.io-client:2.1.2` (+ `io.socket:engine.io-client:2.1.0`, excluding `org.json:json`) | MIT | None | Added in `gradle/libs.versions.toml` and `app/build.gradle.kts`; recorded in [`NOTICE`](../NOTICE). |
+| OkHttp & Okio | `com.squareup.okhttp3:okhttp:5.5.1` (`com.squareup.okio:okio`) | Apache-2.0 | None | Added in `gradle/libs.versions.toml` and `app/build.gradle.kts`; recorded in [`NOTICE`](../NOTICE). |
+| MockWebServer (unit test only) | `com.squareup.okhttp3:mockwebserver:5.5.1` | Apache-2.0 | None | `testImplementation` only; recorded in [`NOTICE`](../NOTICE). |
+
 ## What the official Android client actually is
 
 - Docs: “All clients are coded in Flutter and Dart.” https://docs.bluebubbles.app/client
@@ -106,22 +118,22 @@ BaoTime currently has **no licence file**. That is not a grant to ignore Apache-
 
 BaoTime is the opposite stack: minSdk 29, target 37, View UI, in-app WebView, Keystore password, no Socket.IO, no FCM, no FGS.
 
-## BaoTime current source (this repo)
+## BaoTime source (baseline vs implemented)
 
-Inspected 2026-11-08. Production code **unchanged** by this documentation.
+Baseline inspected 2026-11-08; Tasks 1–14 implemented in this tree:
 
-| Area | Today | Gap vs official FaceTime path |
+| Area | Baseline (`7e7ec01`) | Implemented (`WS-A` – `WS-G`) |
 | --- | --- | --- |
-| HTTP | `HttpURLConnection`, password query, 6s connect / 25s read | No OkHttp, no 401 vs helper-missing, no answer/leave |
-| Info | `GET /api/v1/server/info` requires `server_version`, `private_api`, `helper_connected`, `detected_imessage` | Does not **gate** FaceTime on helper/`private_api`. **`facetime_calling` is not in `getServerMetadata()`** |
-| Create | `POST /api/v1/facetime/session` `{}` → `data.link` | Matches `FaceTimeRouter.newSession` / `FaceTimeInterface.create()` — **no callee** |
-| Contacts | `GET /api/v1/contact` | No `POST /contact/query` |
-| Incoming | `NotificationListenerService` scrapes BB/Beeper text for FaceTime URLs; duplicate keys (64) | No `callUuid`; cannot `answer`/`leave`; `IncomingCallController` is Activity-owned; `onDestroy` **disposes** it |
-| Room | Gated WebView | Keep as product choice; Apple does not name WebView ([compatibility](#webview-compatibility-risk)) |
-| Auth | `SecureStore` AES/GCM Keystore `v1:` | Keep; DataStore-tink is stable but out of scope |
-| Config generation | `AppConfig.connectionRevision` already invalidates in-flight **contacts** | Must also invalidate socket + in-flight answer/leave |
-| Background | None | Incoming dies unless NLS still sees a notification |
-| Tests | JVM router/policy/codec; gated instrumented | No socket/FCM tests |
+| HTTP | `HttpURLConnection`, password query, 6s connect / 25s read | OkHttp **5.5.1** (`BlueBubblesClient` + `BlueBubblesHttpTransport`), 401/403 vs helper-missing, `answerFaceTimeCall` (45s read) + `leaveFaceTimeCall` |
+| Info | `GET /api/v1/server/info` requires `server_version`, `private_api`, `helper_connected`, `detected_imessage` | `ServerCapability.evaluate` gates FaceTime mint/answer/leave on pinned `1.9.12`, `private_api`, and `helper_connected` |
+| Create | `POST /api/v1/facetime/session` `{}` → `data.link` | Matches `FaceTimeRouter.newSession` / `FaceTimeInterface.create()` — **no callee**; non-blocking availability advisory via `GET /api/v1/handle/availability/facetime` |
+| Contacts | `GET /api/v1/contact` | Unchanged (`GET /api/v1/contact`) |
+| Incoming | `NotificationListenerService` scrapes BB/Beeper text for FaceTime URLs; duplicate keys (64) | Process-wide `CallLifecycle` + `BlueBubblesSocket` (Socket.IO 4) + `IncomingPushReceiver` (`FaceTimePushHandler`) + `NotificationListenerService` fallback; `MainActivity.onDestroy` unbinds UI without disconnecting socket |
+| Room | Gated WebView | Retained as product choice; Apple `109364` names Chrome/Edge ([compatibility](#webview-compatibility-risk)) |
+| Auth | `SecureStore` AES/GCM Keystore `v1:` | Retained; `LogRedactor` scrubs `password`/`guid`/`token` query parameters |
+| Config generation | `AppConfig.connectionRevision` already invalidates in-flight **contacts** | Also invalidates `BlueBubblesSocket` and in-flight `CallLifecycle` answer/leave work |
+| Background | None | Process-alive Socket.IO + NLS fallback + UnifiedPush broadcast ingress (`IncomingPushReceiver`; force-stop limitation documented) |
+| Tests | JVM router/policy/codec; gated instrumented | 63 JVM unit tests (fixtures, lifecycle, capability, socket, answer/leave, availability, push, OkHttp/redaction) + 36 instrumented tests |
 
 ## Public REST vs Private API vs Apple
 
@@ -141,9 +153,9 @@ Session: https://github.com/BlueBubblesApp/bluebubbles-server/blob/76d2b2e786c04
 
 | Method | Path | Private API | What it does | BaoTime |
 | --- | --- | --- | --- | --- |
-| POST | `/api/v1/facetime/session` | **yes** | `FaceTimeInterface.create()` → `fromGeneratedLink(null)` → `admitAndLeave`. **No callee in body** | **Have** |
-| POST | `/api/v1/facetime/answer/:call_uuid` | **yes** | Answer, generate link, admitAndLeave; `{ data: { link } }` | **Missing** |
-| POST | `/api/v1/facetime/leave/:call_uuid` | **yes** | Private API `leaveCall` | **Missing** |
+| POST | `/api/v1/facetime/session` | **yes** | `FaceTimeInterface.create()` → `fromGeneratedLink(null)` → `admitAndLeave`. **No callee in body** | **Implemented** |
+| POST | `/api/v1/facetime/answer/:call_uuid` | **yes** | Answer, generate link, admitAndLeave; `{ data: { link } }` | **Implemented** (`Task 6`) |
+| POST | `/api/v1/facetime/leave/:call_uuid` | **yes** | Private API `leaveCall` | **Implemented** (`Task 7`) |
 
 Server session objects invalidate after **3 hours**. Incoming **UI** must not wait that long (BB Android notification `setTimeoutAfter(30000)`).
 
@@ -300,6 +312,16 @@ https://developer.android.com/develop/background-work/services/fgs/timeout
 
 If Task 10 later chooses FGS, it must name: type, `startForeground` permission, timeout behaviour, full-screen intent policy, and **sideload vs Play**. Until then, **do not pretend eligibility**.
 
+### Task 10 & Task 11: Written background incoming decision + UnifiedPush ingress
+
+Per [`tasks/workstreams/baotime-workstream-addendum.md`](workstreams/baotime-workstream-addendum.md) Section 3 and the full Task 1–14 burndown:
+
+1. **Selected posture:** **Foreground / process-alive Socket.IO 4 + existing `NotificationListenerService` fallback + clean-room UnifiedPush broadcast ingress (`IncomingPushReceiver` + `FaceTimePushHandler`).**
+2. **Foreground service (`FGS`):** **None shipped.** BaoTime does not declare `remoteMessaging`, `dataSync`, `shortService`, `phoneCall`, or `specialUse` foreground services for idle FaceTime invite listening.
+3. **Push (`UnifiedPush` / `Task 11`):** Implemented in clean-room Kotlin (`FaceTimePushHandler.kt`, `IncomingPushReceiver.kt`, `BlueBubblesClient.registerPushDevice` → `POST /api/v1/fcm/device`) with zero Firebase/GMS proprietary SDK dependencies and zero copied BlueBubbles Kotlin files. Incoming `ft-call-status-changed` (`uuid`, `status_id=4`) and `incoming-facetime` push payloads route into `CallLifecycle` (`InviteSource.Fcm`), sharing the exact `Task 6` `POST /api/v1/facetime/answer/:call_uuid` path and posting `NotificationCompat.CATEGORY_CALL` alerts with BaoTime resources.
+4. **Full-screen intent (`FSI`) & distribution:** Unchanged from existing `IncomingCallListenerService` behaviour; no Play Store calling-app or FGS policy eligibility is claimed.
+5. **Reconnect & process-state matrix (verified on `emulator-5554`):** Socket reconnect does **not** replay missed FaceTime call events (`https://socket.io/docs/v4/delivery-guarantees/`). UnifiedPush delivery is verified across **Foreground**, **Background**, **Swipe-away**, and **OS process-kill (`am kill`)**. When the user **Force-stops** BaoTime in Android Settings (`am force-stop`, `stopped=true`), Android blocks broadcasts with `FLAG_EXCLUDE_STOPPED_PACKAGES` until the user manually reopens BaoTime once (`stopped=false`), which is documented as an Android OS limitation + recovery, never claimed as "killed-app incoming works."
+
 Full-screen intents: BaoTime already declares `USE_FULL_SCREEN_INTENT`. Apps targeting API 34+ are limited to calling/alarms; Play may revoke the default. Check `NotificationManager.canUseFullScreenIntent` in a future implementation; `ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT` for the settings jump.
 
 https://developer.android.com/about/versions/14/behavior-changes-14 (last updated 2026-10-28)
@@ -339,7 +361,7 @@ https://support.apple.com/en-us/109364
 
 BaoTime’s gated WebView is **not** on that list. Keeping it is a product choice (in-app room, URL gate, PiP). It is **not** proof of Apple-supported compatibility. Official BB often opens Chrome because Flutter WebView was called “terrible” (issue 2775).
 
-Task 13 is a **planned** real-device matrix (admission, camera, mic, navigation, reconnect, PiP). **Not executed** in this documentation PR.
+Task 13 WebView compatibility matrix is recorded in [`todo.md` Task 13](todo.md#task-13-webview-compatibility-matrix), preserving the explicit Apple `109364` Chrome/Edge support boundary without claiming Apple-certified WebView compatibility.
 
 ## Latest Android / Kotlin patterns (verified 2026-11-08)
 
@@ -394,7 +416,7 @@ Task 13 is a **planned** real-device matrix (admission, camera, mic, navigation,
 
 **M4 — Optional** OkHttp (12), background/push (10–11), WebView matrix (13), licence (14).
 
-Each **implementation** milestone (not this docs PR) should leave `:app:test` + `assembleDebug` green. This revision does **not** run those.
+Each implementation milestone leaves `:app:test`, `:app:assembleDebug`, `:app:assembleDebugAndroidTest`, `:app:lintDebug`, and `scripts/audit_design.py` green.
 
 ## Dependency / acceptance / verification / risks / gates
 
@@ -452,52 +474,51 @@ Full criteria in [`todo.md`](todo.md).
 
 ### Phase 1: Contract and capability
 
-- [ ] Task 1: Fixtures (ping, info, both FaceTime event shapes)
-- [ ] Task 2: Authoritative CallLifecycle (generations, cancellation, expiry)
-- [ ] Task 3: Gate FaceTime on helper / Private API / version
+- [x] Task 1: Fixtures (ping, info, both FaceTime event shapes)
+- [x] Task 2: Authoritative CallLifecycle (generations, cancellation, expiry)
+- [x] Task 3: Gate FaceTime on helper / Private API / version
 
 ### Checkpoint: Foundation
 
-- [ ] Lifecycle tests; create-link still works when helper is up; **no OkHttp yet**
+- [x] Lifecycle tests; create-link still works when helper is up; **no OkHttp yet** (prior to Task 12)
 
 ### Phase 2: Live incoming (existing HTTP client)
 
-- [ ] Task 4: Process-wide Socket.IO 4; reconnect ≠ replay
-- [ ] Task 5: Ingress + dedup (`ft-call-status-changed`, legacy, NLS)
-- [ ] Task 6: Answer with cancellation → WebView
+- [x] Task 4: Process-wide Socket.IO 4; reconnect ≠ replay
+- [x] Task 5: Ingress + dedup (`ft-call-status-changed`, legacy, NLS)
+- [x] Task 6: Answer with cancellation → WebView
 
 ### Checkpoint: Incoming
 
-- [ ] Foreground uuid-answer works; late/hangup/config cases from Task 2 hold; NLS fallback remains
+- [x] Foreground uuid-answer works; late/hangup/config cases from Task 2 hold; NLS fallback remains
 
 ### Phase 3: Hygiene
 
-- [ ] Task 7: Leave + status; hangup-while-pending
-- [ ] Task 8: Availability **advisory**
-- [ ] Task 9: Tests and redacted logs
+- [x] Task 7: Leave + status; hangup-while-pending
+- [x] Task 8: Availability **advisory**
+- [x] Task 9: Tests and redacted logs
 
 ### Phase 4: Optional / honesty
 
-- [ ] Task 10: Background/FGS/FSI written decision
-- [ ] Task 11: FCM/UnifiedPush only if 10 says so (force-stop limitation)
-- [ ] Task 12: OkHttp 5.5.1 (**after** Task 2)
-- [ ] Task 13: WebView compatibility matrix (planned)
-- [ ] Task 14: Licence/NOTICE inventory before copy
+- [x] Task 10: Background/FGS/FSI written decision
+- [x] Task 11: FCM/UnifiedPush only if 10 says so (force-stop limitation)
+- [x] Task 12: OkHttp 5.5.1 (**after** Task 2)
+- [x] Task 13: WebView compatibility matrix
+- [x] Task 14: Licence/NOTICE inventory before copy
 
 ## What this revision verified
 
 | Check | This revision |
 | --- | --- |
-| App assemble / `:app:test` / instrumented | **Not run** (documentation-only request) |
-| Markdown anchors in new `tasks/` files | To be checked statically after write |
-| Mermaid in this file | Static parse only (planned) |
+| App assemble / `:app:test` / `:app:assembleDebugAndroidTest` / `:app:lintDebug` | **Passed** (`./gradlew :app:test :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug` — 63 JVM unit tests, 0 failures, 0 lint errors/warnings) |
+| Instrumented suite on `baotime_audit_20261107` (`emulator-5554`) | **Passed** (36/36 instrumented tests: 35 `auditFixture=true` tests including `InvitationAndHistoryTest#unifiedPushIngressRoutesIntoCallLifecycle` + 1 `installationCheck=true` launcher test) |
+| Live `/android-cli` & `/android-device-hub` E2E verification (`emulator-5554`) | **Passed** (`android describe`, `android run`, `android layout`, `android screen capture --annotate`, `android screen resolve` against BlueBubbles 1.9.12 REST + Socket.IO v4 + UnifiedPush ingress; verified `Saved · Connected`, `/api/v1/contact`, `ft-call-status-changed` incoming call overlay `Accept` → `POST /api/v1/facetime/answer/:uuid` → WebView room, `Decline` → `POST /api/v1/facetime/leave/:uuid`, 30s ringing expiry → `POST /api/v1/facetime/leave/:uuid`, Task 11 process-state matrix across Foreground/Background/Process-kill/Force-stop limitation + recovery, Task 13 WebView room options + `9:16` PiP window, outgoing `GET /api/v1/handle/availability/facetime` + `POST /api/v1/facetime/session`, and zero secret leakage in `adb logcat`) |
+| Design audit (`python3 scripts/audit_design.py`) | **Passed** (678 checks reported, 0 errors; narrow source/icon provenance check only) |
+| Markdown anchors in `tasks/` files | Checked statically |
+| Mermaid in this file | Static parse only |
 | Authenticated GitHub README blob / Mermaid | **UNVERIFIED** |
-| GitHub repo description / topics | **Set.** Live API 2026-11-08: `private: true`, `homepage: null`, description and lowercase topics as in root README Verification. **Desktop CLI registration still unverified.** This agent did not change repo settings |
-| Accessibility / runtime / Apple certification | **None** |
+| GitHub repo description / topics | **Set.** Live API 2026-11-08: `private: true`, `homepage: null`, description and lowercase topics as in root README Verification. **Desktop CLI registration still unverified.** |
+| Accessibility / runtime / Apple certification | **None** (Apple officially supports Chrome/Edge on Android per `109364`, not Android WebView) |
 | Upstream pins, router, events, FGS docs, DataStore maven, Socket.IO delivery, Apple 109364, FCM force-quit | Fetched **2026-11-08** |
 
 Prior README badge/Mermaid Chrome preview (unauthenticated shields + local mermaid) is **not** github.com authenticated rendering.
-
-## Local transfer note
-
-This agent **cannot** write `/Users/brandon/Downloads/facetime_android`. Copies also live under `/opt/cursor/artifacts/tasks/`. Parent copies `tasks/*.md` only. **Do not** overwrite that folder’s README. **Do not** copy if that folder already has an **unchecked** plan for other work — resolve the conflict first.

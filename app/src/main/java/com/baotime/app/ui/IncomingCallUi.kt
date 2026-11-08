@@ -60,7 +60,20 @@ object IncomingCallUi {
                     setPadding(0, theme.spaceSm, 0, 0)
                 }
             )
-            val controls = LinearLayout(context).apply {
+            val controls = object : LinearLayout(context) {
+                override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                    val available = MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight
+                    val required = (0 until childCount).sumOf { index ->
+                        val button = getChildAt(index)
+                        require(button is android.widget.Button)
+                        maxOf(button.minimumWidth, kotlin.math.ceil(button.paint.measureText(button.text.toString())).toInt() +
+                            button.paddingLeft + button.paddingRight) + theme.spaceMd * 2
+                    }
+                    val direction = if (available > 0 && required > available) VERTICAL else HORIZONTAL
+                    if (orientation != direction) orientation = direction
+                    super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+                }
+            }.apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
                 setPadding(0, theme.spaceXl, 0, 0)
@@ -88,16 +101,6 @@ object IncomingCallUi {
                     iconTint = theme.colorOnAccent
                 ) { onAccept() }
             )
-            controls.addOnLayoutChangeListener { _, left, _, right, _, _, _, _, _ ->
-                val required = (0 until controls.childCount).sumOf { index ->
-                    val button = controls.getChildAt(index)
-                    require(button is android.widget.Button)
-                    maxOf(button.minimumWidth, kotlin.math.ceil(button.paint.measureText(button.text.toString())).toInt() +
-                        button.paddingLeft + button.paddingRight) + theme.spaceMd * 2
-                }
-                val direction = if (required > right - left) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
-                if (controls.orientation != direction) controls.orientation = direction
-            }
             column.addView(controls)
             addView(column)
             ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->

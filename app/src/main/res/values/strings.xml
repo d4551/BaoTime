@@ -11,6 +11,10 @@
     <string name="banner_unreachable_http">BlueBubbles Server unreachable: the server refused the request (see Settings tab)</string>
     <string name="banner_unreachable_unknown">BlueBubbles Server status is unavailable.</string>
     <string name="banner_credentials_unavailable">Stored BlueBubbles password could not be read. Enter it again in Settings.</string>
+    <string name="banner_unauthorized">BlueBubbles Server rejected the password (see Settings tab)</string>
+    <string name="banner_helper_unavailable">FaceTime helper and Private API must be enabled on your Mac</string>
+    <string name="banner_unsupported_version">BlueBubbles Server 1.9.12 is required for FaceTime</string>
+    <string name="call_advisory_unavailable">FaceTime may be unavailable for this address; creating a shareable link anyway</string>
 
     <!-- Shared actions and navigation -->
     <string name="input_label">Phone, Email or FaceTime Link</string>
@@ -49,11 +53,11 @@
     <string name="contacts_imessage_header">iMessage Contacts</string>
     <string name="contacts_favorites_header">Favorites</string>
     <string name="contacts_device_header">On This Device</string>
-    <string name="contacts_search_label">Search Contacts</string>
+    <string name="contacts_search_label">Search contacts</string>
     <string name="contacts_search_hint">Name, phone or email</string>
     <plurals name="contacts_show_all">
-        <item quantity="one">Show All (%1$d More)</item>
-        <item quantity="other">Show All (%1$d More)</item>
+        <item quantity="one">Show all (%1$d more)</item>
+        <item quantity="other">Show all (%1$d more)</item>
     </plurals>
     <string name="contacts_sync_offline">Mac contacts unavailable</string>
     <string name="contacts_no_matches">No matches.</string>

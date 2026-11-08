@@ -1,0 +1,19 @@
+{
+  "uuid": "00000000-0000-4000-8000-000000000001",
+  "status": "incoming",
+  "status_id": 4,
+  "ended_error": null,
+  "ended_reason": null,
+  "address": "caller@example.com",
+  "handle": {
+    "originalROWID": 1,
+    "address": "caller@example.com",
+    "service": "iMessage",
+    "uncanonicalizedId": null,
+    "country": "us"
+  },
+  "image_url": null,
+  "is_outgoing": false,
+  "is_audio": false,
+  "is_video": true
+}

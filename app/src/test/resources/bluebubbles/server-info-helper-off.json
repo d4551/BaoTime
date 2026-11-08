@@ -1,0 +1,19 @@
+{
+  "status": 200,
+  "message": "Success",
+  "data": {
+    "computer_id": "redacted@macbook.local",
+    "os_version": "27.2.0",
+    "server_version": "1.9.12",
+    "private_api": true,
+    "proxy_service": "Dynamic DNS",
+    "helper_connected": false,
+    "detected_icloud": null,
+    "detected_imessage": "user@example.com",
+    "macos_time_sync": -0.000323,
+    "local_ipv4s": [
+      "192.168.1.10"
+    ],
+    "local_ipv6s": []
+  }
+}

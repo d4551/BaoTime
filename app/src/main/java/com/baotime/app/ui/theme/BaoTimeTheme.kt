@@ -138,7 +138,7 @@ class BaoTimeTheme(val context: Context) {
         val edges = listOf(Gravity.BOTTOM to navigation.bottom, Gravity.START to start,
             Gravity.END to end).filter { it.second > 0 }
         val layers = listOf<Drawable>(surfaceDrawable(0, colorCallChrome)) +
-            edges.map { surfaceDrawable(0, colorCallChrome) }
+            edges.map { surfaceDrawable(0, colorBg) }
         return LayerDrawable(layers.toTypedArray()).apply {
             edges.forEachIndexed { index, (edge, size) ->
                 if (edge == Gravity.BOTTOM) {

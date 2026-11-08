@@ -3,91 +3,90 @@ package com.baotime.app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
-import android.widget.EditText
+import android.util.Log
 import android.widget.LinearLayout
 import android.widget.Toast
-import androidx.activity.addCallback
-import androidx.core.widget.doAfterTextChanged
 import androidx.activity.ComponentActivity
+import androidx.activity.addCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
-import com.baotime.app.call.IncomingCallController
+import com.baotime.app.call.CallLifecycle
 import com.baotime.app.call.CallSessionController
+import com.baotime.app.call.IncomingCallController
 import com.baotime.app.call.IncomingCallListenerService
+import com.baotime.app.call.IncomingPushReceiver
 import com.baotime.app.config.AppConfig
 import com.baotime.app.data.BaoCallRecord
 import com.baotime.app.data.CallHistory
 import com.baotime.app.data.ContactsCache
 import com.baotime.app.data.ContactsRepository
 import com.baotime.app.network.BlueBubblesClient
+import com.baotime.app.network.BlueBubblesServerStatus
+import com.baotime.app.network.FaceTimeAvailabilityResult
 import com.baotime.app.network.FaceTimeSessionResult
+import com.baotime.app.network.ServerCapability
 import com.baotime.app.network.ServerFailure
 import com.baotime.app.routing.RoutedAction
 import com.baotime.app.routing.UrlRouter
 import com.baotime.app.ui.ContactsTabController
-import com.baotime.app.ui.IncomingCallUi
 import com.baotime.app.ui.MainChrome
-import com.baotime.app.ui.ModalSheetUi
-import com.baotime.app.ui.NewCallSheetUi
-import com.baotime.app.ui.RecordDetailUi
 import com.baotime.app.ui.RecentsTabUi
-import com.baotime.app.ui.components.BaoTimeComponents
 import com.baotime.app.ui.RootUi
 import com.baotime.app.ui.SheetController
-import com.baotime.app.ui.SetupTabUi
 import com.baotime.app.ui.theme.BaoTimeMotion
 import com.baotime.app.ui.theme.BaoTimeTheme
 import kotlinx.coroutines.CoroutineExceptionHandler
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /** Wires the scaffold, routing, permissions, tabs, and call sessions. */
 class MainActivity : ComponentActivity() {
 
-    private val appConfig by lazy { AppConfig(this) }
-    private val history by lazy { CallHistory(this) }
-    private val contacts by lazy { ContactsRepository(this) }
-    private val bbClient by lazy { BlueBubblesClient(appConfig) }
+    private val baoTimeApp: BaoTimeApp by lazy { application as BaoTimeApp }
+    private val appConfig: AppConfig by lazy { baoTimeApp.appConfig }
+    private val history: CallHistory by lazy { baoTimeApp.callHistory }
+    private val contacts: ContactsRepository by lazy { baoTimeApp.contactsRepository }
+    private val bbClient: BlueBubblesClient by lazy { baoTimeApp.bbClient }
+    private val callLifecycle: CallLifecycle by lazy { baoTimeApp.callLifecycle }
     private val theme by lazy { BaoTimeTheme(this) }
     private val currentTab = AtomicInteger(0)
     private val callPending = AtomicBoolean(false)
     private var renderGeneration = 0
     private val contactCache by lazy { ContactsCache(contacts, bbClient, appConfig) }
-    private val contactsTab by lazy { ContactsTabController(theme, appConfig, contactCache, ::launchSafely, { sheets.showContact(it) }) }
+    private val contactsTab by lazy {
+        ContactsTabController(theme, appConfig, contactCache, ::launchSafely, { sheets.showContact(it) })
+    }
 
     private val chrome: MainChrome by lazy {
-        RootUi.build(
-            theme = theme,
-            onNewLink = { sheets.showNew() },
-            onTabSelected = ::selectTab,
-            onClearHistory = { sheets.showClearHistory() },
-            onOpenSetup = { sheets.showSetup() }
-        )
+        RootUi.build(theme, { sheets.showNew() }, ::selectTab, { sheets.showClearHistory() }, { sheets.showSetup() })
     }
 
     private val callSessions by lazy {
-        CallSessionController(
-            history = history,
-            onSessionClosed = { refreshCurrentTab() }
-        )
+        CallSessionController(history) {
+            callLifecycle.onRoomClosed()
+            refreshCurrentTab()
+        }
     }
 
     private val sheets by lazy {
-        SheetController(chrome.rootFrame, theme, appConfig, history, contactCache, ::launchSafely,
-            ::startOutgoingCall, ::submitHandleInput, ::openCallSession, ::refreshCurrentTab, ::onServerConfigSaved)
+        SheetController(
+            chrome.rootFrame, theme, appConfig, history, contactCache, ::launchSafely,
+            ::startOutgoingCall, ::submitHandleInput, ::openCallSession, ::refreshCurrentTab, ::onServerConfigSaved
+        )
     }
 
     private val incomingCalls by lazy {
-        IncomingCallController(chrome.rootFrame, theme, history, ::launchSafely,
-            ::joinIncomingWebLink, ::refreshCurrentTab)
+        IncomingCallController(chrome.rootFrame, theme, callLifecycle, ::joinIncomingWebLink)
     }
 
     private val errorHandler = CoroutineExceptionHandler { _, failure ->
-        android.util.Log.e("BaoTime", "Unexpected app failure: ${failure.javaClass.simpleName}")
+        Log.e("BaoTime", "Unexpected app failure: ${failure.javaClass.simpleName}")
         reportFailure()
     }
 
@@ -105,14 +104,20 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Native chrome follows the actual appearance; foreground surfaces own temporary changes.
-        androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).apply {
-            isAppearanceLightStatusBars = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK != android.content.res.Configuration.UI_MODE_NIGHT_YES
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars =
+                resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK != Configuration.UI_MODE_NIGHT_YES
             isAppearanceLightNavigationBars = isAppearanceLightStatusBars
         }
         setContentView(chrome.rootFrame)
         chrome.headerTitle.setText(R.string.tab_recents)
         RootUi.styleTabs(theme, chrome.tabButtons, currentTab.get())
+        incomingCalls.bindProcessEvents(this, baoTimeApp, { sheets.dismiss() }, ::refreshCurrentTab) {
+            Toast.makeText(this@MainActivity, R.string.call_create_failed, Toast.LENGTH_LONG).show()
+            refreshServerBanner()
+        }
         handleIncomingIntent(intent)
+        baoTimeApp.socket.ensureConnected()
         launchSafely { refreshServerBanner() }
         refreshCurrentTab()
         IncomingCallListenerService.ensureChannel(this)
@@ -144,8 +149,9 @@ class MainActivity : ComponentActivity() {
         // Re-read system integration state: the user may have just changed it
         // in system settings (domain handler, notification access).
         sheets.refreshSetupStatus()
+        incomingCalls.syncState(callLifecycle.state.value)
         if (currentTab.get() == TAB_CONTACTS) refreshCurrentTab()
-        if (android.os.Build.VERSION.SDK_INT >= 33 && !notificationPermissionRequested &&
+        if (Build.VERSION.SDK_INT >= 33 && !notificationPermissionRequested &&
             IncomingCallListenerService.hasNotificationAccess(this) &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
@@ -165,6 +171,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        // Activity teardown unbinds UI only; process-wide Socket.IO and CallLifecycle stay alive.
         callSessions.closeSession()
         incomingCalls.dispose()
         sheets.dismiss()
@@ -198,6 +205,13 @@ class MainActivity : ComponentActivity() {
     // ---- Incoming links ---------------------------------------------------------------
 
     private fun handleIncomingIntent(incoming: Intent?) {
+        val pushUuid = incoming?.getStringExtra(IncomingPushReceiver.EXTRA_PUSH_CALL_UUID)?.trim().orEmpty()
+        if (pushUuid.isNotEmpty()) {
+            IncomingPushReceiver.cancelCallNotification(this, pushUuid)
+            sheets.dismiss()
+            incomingCalls.syncState(callLifecycle.state.value)
+            return
+        }
         when (val action = UrlRouter.routeIntent(incoming)) {
             is RoutedAction.JoinFaceTimeWebLink -> {
                 if (incoming?.getBooleanExtra(IncomingCallListenerService.EXTRA_INCOMING_CALL, false) == true) {
@@ -207,14 +221,11 @@ class MainActivity : ComponentActivity() {
                     joinIncomingWebLink(action)
                 }
             }
-            is RoutedAction.InitiateFaceTimeCall -> {
-                sheets.showNew(action.handle)
-            }
+            is RoutedAction.InitiateFaceTimeCall -> sheets.showNew(action.handle)
             is RoutedAction.OpenHome -> {
                 if (!action.prefillHandle.isNullOrBlank()) {
                     sheets.showNew(action.prefillHandle)
-                    val extracted = UrlRouter.wholeFaceTimeUrl(action.prefillHandle)
-                    if (extracted != null) {
+                    UrlRouter.wholeFaceTimeUrl(action.prefillHandle)?.let { extracted ->
                         openRecordedWebLink(extracted, getString(R.string.link_label))
                     }
                 }
@@ -238,23 +249,14 @@ class MainActivity : ComponentActivity() {
 
     private fun submitHandleInput(raw: String) {
         val ftUrl = UrlRouter.wholeFaceTimeUrl(raw)
-        if (ftUrl != null) {
-            openRecordedWebLink(ftUrl, getString(R.string.link_label))
-        } else {
-            startOutgoingCall(raw)
-        }
+        if (ftUrl != null) openRecordedWebLink(ftUrl, getString(R.string.link_label)) else startOutgoingCall(raw)
     }
 
     /** Opens a FaceTime web link and records it into history. */
     private fun openRecordedWebLink(url: String, title: String) {
         launchSafely {
             val name = contacts.lookupContactName(title) ?: title
-            val record = history.recordCall(
-                handleOrNumber = title,
-                displayName = name,
-                faceTimeUrl = url,
-                callType = BaoCallRecord.TYPE_OUTGOING
-            )
+            val record = history.recordCall(title, name, url, BaoCallRecord.TYPE_OUTGOING)
             openCallSession(url, name, record.id)
         }
     }
@@ -262,6 +264,9 @@ class MainActivity : ComponentActivity() {
     /**
      * Creates a FaceTime link, records it, and opens it. A failed create shows a toast
      * and does not open a page.
+     *
+     * Per `facetimeRouter.ts` @ `76d2b2e`, `POST /api/v1/facetime/session` takes `{}` with no
+     * callee handle; `GET /api/v1/handle/availability/facetime` is strictly a non-blocking advisory.
      */
     private fun startOutgoingCall(targetHandle: String, displayOverride: String? = null) {
         // Debounce: one pending session creation at a time, with inline state
@@ -269,16 +274,17 @@ class MainActivity : ComponentActivity() {
         if (!callPending.compareAndSet(false, true)) return
         updateConnectionState(getString(R.string.call_generating), theme.colorWarning)
         launchSafely {
+            val trimmedHandle = targetHandle.trim()
+            if (trimmedHandle.isNotEmpty() && UrlRouter.wholeFaceTimeUrl(trimmedHandle) == null) {
+                if (bbClient.checkFaceTimeAvailability(trimmedHandle) == FaceTimeAvailabilityResult.Unavailable) {
+                    Toast.makeText(this@MainActivity, R.string.call_advisory_unavailable, Toast.LENGTH_SHORT).show()
+                }
+            }
             when (val result = bbClient.createFaceTimeSession()) {
                 is FaceTimeSessionResult.Created -> {
                     callPending.set(false)
                     val label = resolveOutgoingLabel(targetHandle, displayOverride)
-                    val record = history.recordCall(
-                        handleOrNumber = targetHandle,
-                        displayName = label,
-                        faceTimeUrl = result.link,
-                        callType = BaoCallRecord.TYPE_OUTGOING
-                    )
+                    val record = history.recordCall(targetHandle, label, result.link, BaoCallRecord.TYPE_OUTGOING)
                     openCallSession(result.link, label, record.id)
                     refreshServerBanner()
                 }
@@ -297,27 +303,19 @@ class MainActivity : ComponentActivity() {
         return contacts.lookupContactName(targetHandle) ?: targetHandle
     }
 
-    private fun openCallSession(url: String, title: String, recordId: String) {        // No upfront media prompt: media is granted automatically only when the
+    private fun openCallSession(url: String, title: String, recordId: String) {
+        // No upfront media prompt: media is granted automatically only when the
         // user already consented; otherwise Allow is the explicit consent path.
         sheets.dismiss()
-        callSessions.openSession(
-            activity = this,
-            host = chrome.rootFrame,
-            theme = theme,
-            url = url,
-            title = title,
-            recordId = recordId,
-            onAllowMedia = ::requestCallMediaThenAllow
-        )
+        callLifecycle.onRoomOpened(url, recordId)
+        callSessions.openSession(this, chrome.rootFrame, theme, url, title, recordId, ::requestCallMediaThenAllow)
     }
 
     // ---- Tabs ---------------------------------------------------------------------------
 
     private fun selectTab(index: Int) {
         currentTab.set(index)
-        chrome.headerTitle.setText(
-            if (index == TAB_RECENTS) R.string.tab_recents else R.string.tab_contacts
-        )
+        chrome.headerTitle.setText(if (index == TAB_RECENTS) R.string.tab_recents else R.string.tab_contacts)
         RootUi.styleTabs(theme, chrome.tabButtons, index)
         refreshCurrentTab()
     }
@@ -349,9 +347,7 @@ class MainActivity : ComponentActivity() {
             container.removeAllViews()
             RecentsTabUi.populate(
                 theme, container, records,
-                onJoin = { record ->
-                    record.faceTimeUrl?.let { url -> openCallSession(url, record.displayName, record.id) }
-                },
+                onJoin = { record -> record.faceTimeUrl?.let { url -> openCallSession(url, record.displayName, record.id) } },
                 onCall = { record -> startOutgoingCall(record.handleOrNumber, record.displayName) },
                 onOpenDetail = { record -> sheets.showRecord(record) }
             )
@@ -361,33 +357,28 @@ class MainActivity : ComponentActivity() {
     // ---- Server banner ----------------------------------------------------------------------
 
     /** Fixed copy for each typed server failure. No diagnostic text is interpolated. */
-    private fun bannerFor(failure: ServerFailure?): String {
-        val res = when (failure) {
-            ServerFailure.PasswordMissing -> R.string.banner_unreachable_password
-            ServerFailure.CredentialsUnavailable -> R.string.banner_credentials_unavailable
-            ServerFailure.UrlMissing -> R.string.banner_unreachable_url
-            ServerFailure.UrlRejected -> R.string.banner_unreachable_rejected
-            ServerFailure.HttpFailed, ServerFailure.EmptyLink -> R.string.banner_unreachable_http
-            null -> R.string.banner_unreachable_unknown
-        }
-        return getString(res)
-    }
+    private fun bannerFor(failure: ServerFailure?): String =
+        getString(ServerCapability.bannerResource(failure))
 
-    private suspend fun onServerConfigSaved(): com.baotime.app.network.BlueBubblesServerStatus {
+    private suspend fun onServerConfigSaved(): BlueBubblesServerStatus {
         contactCache.invalidate()
+        baoTimeApp.socket.onConfigChanged(appConfig.connectionRevision())
         refreshCurrentTab()
         return refreshServerBanner()
     }
 
     private fun updateConnectionState(description: String, tint: Int) {
         chrome.setupAction.setColorFilter(tint)
-        androidx.core.view.ViewCompat.setStateDescription(chrome.setupAction, description)
+        ViewCompat.setStateDescription(chrome.setupAction, description)
     }
 
-    private suspend fun refreshServerBanner(): com.baotime.app.network.BlueBubblesServerStatus {
+    private suspend fun refreshServerBanner(): BlueBubblesServerStatus {
         val status = bbClient.checkServerStatus()
-        updateConnectionState(if (status.reachable) getString(R.string.banner_connected) else bannerFor(status.failure),
-            if (status.reachable) theme.colorBaoGreen else theme.colorDanger)
+        val capable = status.isFaceTimeCapable
+        updateConnectionState(
+            if (capable) getString(R.string.banner_connected) else bannerFor(status.failure),
+            if (capable) theme.colorBaoGreen else theme.colorDanger
+        )
         return status
     }
 
