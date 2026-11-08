@@ -32,4 +32,4 @@ Every HIGH and MED item above is accepted. No finding is dismissed. Where the pr
 | Task 11 force-stop = killed-app incoming | Task 11 splits states; force-stop is a documented limitation |
 | (missing) WebView matrix / licence inventory | Tasks 13–14 |
 
-Frozen docs commit for this response: recorded in the PR after push (see PR body). The parent commit under review was `29ff359a2d8fde8366be980c2c6d089d8fdb9385`.
+Frozen docs commit for this response: `c9b8f6a5ecd22e7ba44ececa0feb9781d3f940d3` (this file may also appear in a SHA-stamp follow-up). The parent commit under review was `29ff359a2d8fde8366be980c2c6d089d8fdb9385`.
