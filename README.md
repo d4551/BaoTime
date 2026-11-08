@@ -23,6 +23,7 @@ It is **not** Apple FaceTime, **not** an iMessage client, and **not** a replacem
 ## Contents
 
 - [What it is](#what-it-is)
+- [Documentation index](#documentation-index)
 - [Features](#features)
 - [Architecture](#architecture)
 - [Call flows](#call-flows)
@@ -34,6 +35,7 @@ It is **not** Apple FaceTime, **not** an iMessage client, and **not** a replacem
 - [Repository layout](#repository-layout)
 - [Security and data](#security-and-data)
 - [Limitations](#limitations)
+- [Verification status](#verification-status)
 
 ## What it is
 
@@ -42,6 +44,19 @@ BaoTime (`com.baotime.app`, version **1.1.0** / `versionCode` 2) is a single-mod
 The Mac side is out of this tree. BaoTime is the Android client: it stores your BlueBubbles base URL and password, calls three HTTP APIs, opens `https://facetime.apple.com/...` rooms, and cooperates with BlueBubbles / Beeper notifications plus Android's link and dial intents.
 
 This GitHub repository is **private**. There is **no license file** and **no GitHub Actions workflow**. Badges above are static shields, not CI status.
+
+## Documentation index
+
+In-tree work-package docs (planning only; they do not change app behaviour by themselves):
+
+| Doc | What it is |
+| --- | --- |
+| [`tasks/README.md`](tasks/README.md) | Index of the work packages |
+| [`tasks/plan.md`](tasks/plan.md) | Source-backed BlueBubbles FaceTime ingest plan (pins, licence, call lifecycle, FGS/push, WebView risk) |
+| [`tasks/todo.md`](tasks/todo.md) | Dependency-ordered tasks with acceptance and verification |
+| [`tasks/audit-resolution.md`](tasks/audit-resolution.md) | Code Auditor finding → resolution → location |
+
+Those files assume utilisation of current Android / BlueBubbles patterns and are **not** an implementation. They are **not** a certified legal clean-room.
 
 ## Features
 
@@ -72,7 +87,7 @@ Grounded in `app/src/main` (manifest, strings, and Kotlin). Things the app does 
 
 ### FaceTime room
 
-- One WebView overlay. JavaScript is **off** until the URL is a canonical HTTPS FaceTime room (`facetime.apple.com`, no userinfo, port 443 or default).
+- One WebView overlay. JavaScript is **off** until the URL is a canonical HTTPS FaceTime room (`facetime.apple.com`, no userinfo, port 443 or default). Apple’s own FaceTime-on-the-web article names **Chrome or Edge** on Android, not WebView — see [Limitations](#limitations).
 - Main-frame navigation must stay on those rooms. Subframes must be HTTPS on `apple.com` / `icloud.com` hosts (lookalikes rejected).
 - Camera and microphone: Apple's page requests them; BaoTime shows **Continue** only after that, then asks Android for `CAMERA` / `RECORD_AUDIO` if needed. Declining an incoming invitation never starts media.
 - Picture-in-picture (9:16). Auto-enter on Android 12+ only while this overlay is the top surface and resumed.
@@ -362,6 +377,7 @@ BaoTime/
 ├── assets/                       # Icon Composer source, iOS exports, Android receipts, previews
 ├── gradle/                       # version catalog, wrapper, daemon JVM 25
 ├── scripts/                      # design audit + ImageMagick projection
+├── tasks/                        # work-package plan, todo, audit map (docs only)
 ├── build.gradle.kts              # AGP plugin, apply false
 ├── settings.gradle.kts           # rootProject.name = BaoTime
 ├── gradle.properties
@@ -385,6 +401,7 @@ UI is DayNight (`Theme.DeviceDefault.DayNight`), tokens in `values/` + `values-n
 ## Limitations
 
 - **Not Apple FaceTime.** Rooms are Apple's web client. Link minting needs a working BlueBubbles FaceTime helper on a Mac you control.
+- **WebView is not Apple-supported FaceTime-on-the-web.** Apple documents joining from Android via the latest **Google Chrome or Microsoft Edge** ([HT211828 / 109364](https://support.apple.com/en-us/109364), published 2026-05-29). BaoTime’s gated WebView is a product choice (URL gate, in-app room, PiP). Compatibility of admission, camera, microphone, navigation, reconnect, and PiP is a **planned** real-device matrix in [`tasks/todo.md`](tasks/todo.md) Task 13 — **not executed** and **not** an accessibility or runtime certification.
 - **No in-tree iOS app.** `assets/` holds Icon Composer / iOS PNG exports used to project the Android launcher.
 - **No license, no CI, no releases** in this repository as of the tree this README describes.
 - **Private repo.** Shields that would need GitHub API access (stars, workflow status, detected license) are omitted on purpose.
@@ -397,8 +414,25 @@ UI is DayNight (`Theme.DeviceDefault.DayNight`), tokens in `values/` + `values-n
 - Recents is local to the phone, not iCloud / Mac history.
 - Speaker control is a no-op below API 31 (`CallAudioRouter.enableSpeaker` returns false).
 - Contacts runtime permission is settings-only, not a first-launch dialog.
-- `createFaceTimeSession` does not send the callee handle to BlueBubbles; it mints a **link you then share**. The handle is a local label / history key.
+- `createFaceTimeSession` does not send the callee handle to BlueBubbles; it mints a **link you then share**. The handle is a local label / history key. Server `POST /api/v1/facetime/session` takes `{}` with no callee. Callee FaceTime availability, if shown later, is **advisory** unless a recorded product rule says otherwise ([`tasks/todo.md`](tasks/todo.md) Task 8).
 - One room at a time (`CallSessionController` closes the previous session).
 - Instrumented audit / Xiaomi deployment / launcher tests are environment-specific and argument-gated.
 - Design audit does not certify accessibility or on-device contrast.
+- There is **no** certified legal clean-room process in this repository. Planning docs describe a “do not copy Flutter” engineering default, not a legal opinion ([`tasks/plan.md`](tasks/plan.md)).
+- Incoming socket/push work in `tasks/` is **not shipped**. Today’s incoming path is notification-text scrape only.
+
+## Verification status
+
+What was actually checked for this README and the `tasks/` docs, versus what is still future work.
+
+| Check | Status |
+| --- | --- |
+| Static shields (version, SDK, AGP, Gradle, Kotlin, private) | **Previewed earlier** in headless Chrome against live shields.io (unauthenticated). **Not** a CI badge. |
+| Mermaid in this README (architecture, create-link, incoming NLS, room gate) | **Parsed and rendered earlier** with mermaid 11 in headless Chrome. **Authenticated github.com blob rendering is UNVERIFIED** (private repo; needs a logged-in GitHub session). |
+| In-document markdown anchors and relative file links | Checked when the README landed; re-check after this edit (static only). |
+| Mermaid in [`tasks/plan.md`](tasks/plan.md) (planned CallLifecycle) | Static syntax check only in the documentation revision. **Not** runtime. |
+| App `assembleDebug` / `:app:test` / instrumented | **Not run** for the documentation-only follow-ups. Commands above are what the tree exposes, not a pass claim. |
+| Accessibility, Apple HIG, FaceTime WebView compatibility | **Not certified.** Task 13 is planned. |
+| GitHub repo description / topics via `gh` | **Proposed only; not set.** Desktop CLI topic list **unverified**. |
+| Design `scripts/audit_design.py` | Narrow source/icon provenance; not runtime certification. |
 )

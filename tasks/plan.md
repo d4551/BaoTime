@@ -1,294 +1,488 @@
 # Implementation Plan: Ingest useful BlueBubbles FaceTime client behaviour into BaoTime
 
-Retrieval date: **2026-11-08**. Planning only. No app code in this change.
+Retrieval date: **2026-11-08**. **Documentation only.** No application code, Gradle, or tests in this change.
+
+Companion docs: [`README.md`](README.md) (index) · [`todo.md`](todo.md) · [`audit-resolution.md`](audit-resolution.md). Repository README: [`../README.md`](../README.md).
 
 ## Overview
 
-BaoTime is already a native Kotlin FaceTime-web client that talks to a personal BlueBubbles server (`GET /api/v1/server/info`, `POST /api/v1/facetime/session`, `GET /api/v1/contact`) and opens `https://facetime.apple.com` rooms in a gated WebView. Incoming calls today scrape BlueBubbles/Beeper **notification text**.
+BaoTime is already a native Kotlin FaceTime-**web** client. It talks to a personal BlueBubbles server (`GET /api/v1/server/info`, `POST /api/v1/facetime/session` with `{}`, `GET /api/v1/contact`) and opens `https://facetime.apple.com` rooms in a gated WebView. Incoming invites today scrape BlueBubbles/Beeper **notification text** for a FaceTime URL.
 
-The official BlueBubbles **Android app is Flutter/Dart**, not a Kotlin app. Native Android is a Kotlin plugin layer around Flutter (FCM, notifications, foreground socket). It cannot be copied into BaoTime as-is. Useful FaceTime behaviour should be **reimplemented** against the documented server REST + Socket.IO APIs, using current Android/Kotlin patterns. Do **not** become an iMessage client. Do **not** add unsupported Apple FaceTime native APIs on Android (none exist). Do **not** copy or hook macOS Private API dylibs onto the phone.
+The official BlueBubbles **Android app is Flutter/Dart**, not a Kotlin app. Native Android is a Kotlin plugin layer around Flutter (FCM, notifications, `SocketIOForegroundService`). It cannot be copied into BaoTime as-is. Useful FaceTime behaviour should be **reimplemented** against documented server REST + Socket.IO APIs.
 
-This plan maps exact upstream pins, licence rules, public vs Private-API server surfaces, and vertical slices with acceptance and verification. Task checklist lives in [`tasks/todo.md`](todo.md).
+This is **not** a certified legal clean-room (see [Licence](#licence-obligations-apache-20)). It is an engineering default: do not copy Flutter/Dart or Flutter `MethodChannel` Kotlin.
+
+Do **not** become an iMessage client. Do **not** add unsupported Apple FaceTime native APIs on Android (none exist). Do **not** copy or hook macOS Private API dylibs onto the phone. Do **not** treat Android WebView as Apple-supported FaceTime (Apple names Chrome or Edge).
+
+**Work-package order:** Call lifecycle contract (Task 2) and socket/answer/leave (Tasks 4–7) **precede** any HTTP library swap (Task 12).
+
+## Assumptions and non-goals
+
+### Assumptions
+
+1. Target server remains BlueBubbles **v1.9.12** (`76d2b2e786c04d7516de089f31be978a68da8083`) with FaceTime helper connected and Private API enabled on a Mac the user controls.
+2. BaoTime stays a single-module View app (`com.baotime.app`, minSdk 29, target/compileSdk 37).
+3. Rooms remain Apple’s web client in the existing WebView gate until Task 13 says otherwise.
+4. Server auth stays query `password` / `guid` / `token` (public v1 API). Password stays in Keystore `SecureStore` `v1:`.
+5. `AppConfig.connectionRevision` is the config generation to correlate in-flight HTTP and sockets.
+6. Killed-app incoming is **not** required for M2 unless a human answers the open question in Task 10.
+7. Distribution may be sideload; Google Play FGS/FSI declarations are a **separate** product decision.
+
+### Non-goals
+
+- Native Apple FaceTime / undocumented WebRTC / MITM of Apple.
+- Shipping helper dylibs or IMCore hooks on Android.
+- iMessage chat, reactions, typing, Find My, backups, Mac lock, server updates from the phone.
+- Copying Flutter UI, ObjectBox, GetX, or `MethodChannel` handlers.
+- Claiming socket reconnect replays missed call events.
+- Claiming FCM after Settings force-stop.
+- Claiming `remoteMessaging` or `dataSync` Play eligibility for a FaceTime signaling socket.
+- Blocking generic `POST /facetime/session` on callee availability.
+- Certified accessibility, HIG, or runtime certification.
+- Merging this PR or writing `/Users/brandon/Downloads/facetime_android`.
 
 ## Upstream pins (verified 2026-11-08)
 
 | Artifact | Pin | Evidence |
 | --- | --- | --- |
-| Client repo | https://github.com/BlueBubblesApp/bluebubbles-app Apache-2.0 | `gh api repos/BlueBubblesApp/bluebubbles-app` → `license: Apache-2.0`, language **Dart** |
-| Client default HEAD | `master` @ `60113ebababbf23c9faf8fc6746c6691b30d6f69` (2026-11-08, “Don't trust LAN override after connection loss”) | GitHub commits API |
-| Latest **Android** client release | **v2.1.5+android.95** published 2026-10-29, commit `ff8bfd5a57a8c6686c50d7b7b03d4ef8a5bded11` | GitHub releases + git ref `v2.1.5+android.95` |
-| Latest GitHub “latest” client tag | Desktop **v2.1.6+desktop.96** (2026-11-03). Not the Android APK. | `gh release list` |
+| Client repo | https://github.com/BlueBubblesApp/bluebubbles-app Apache-2.0 | GitHub API `license: Apache-2.0`, language **Dart** |
+| Latest **Android** client release | **v2.1.5+android.95** (2026-10-29), commit `ff8bfd5a57a8c6686c50d7b7b03d4ef8a5bded11` | GitHub releases |
+| Client default HEAD (context) | `master` @ `60113ebababbf23c9faf8fc6746c6691b30d6f69` | GitHub commits API |
+| Latest GitHub “latest” client tag | Desktop **v2.1.6+desktop.96** (2026-11-03). Not the Android APK | `gh release list` |
 | Server repo | https://github.com/BlueBubblesApp/bluebubbles-server Apache-2.0 | GitHub API |
 | Latest **stable** server | **v1.9.12** (2026-10-27), commit `76d2b2e786c04d7516de089f31be978a68da8083` | GitHub releases |
-| Helper (macOS Private API) | https://github.com/BlueBubblesApp/bluebubbles-helper Apache-2.0; latest tag **0.0.21** (2024-11-19) | GitHub API |
+| Helper | https://github.com/BlueBubblesApp/bluebubbles-helper Apache-2.0; tag **0.0.21** (2024-11-19) | GitHub API |
 | Socket.IO on server v1.9.12 | `"socket.io": "^4.7.5"` | `packages/server/package.json` @ tag v1.9.12 |
-| REST docs | https://docs.bluebubbles.app/server/developer-guides/rest-api-and-webhooks | fetched 2026-11-08 (page footer also says “Last updated 3 years ago” — treat Postman + `httpRoutes.ts` as source of truth for paths) |
-| Postman | https://documenter.getpostman.com/view/765844/UV5RnfwM | linked from official REST docs |
-| Private API docs | https://docs.bluebubbles.app/private-api | helper capabilities; **macOS only** |
+| Socket.IO Java client | **2.1.2** latest on Maven Central (`lastUpdated` 2025-02-18); speaks Engine.IO/Socket.IO 4 | https://repo1.maven.org/maven2/io/socket/socket.io-client/maven-metadata.xml |
+| REST docs | https://docs.bluebubbles.app/server/developer-guides/rest-api-and-webhooks | Page footer also “Last updated 3 years ago” — treat Postman + `httpRoutes.ts` as path source of truth |
+| Postman | https://documenter.getpostman.com/view/765844/UV5RnfwM | Linked from official REST docs |
+| Private API docs | https://docs.bluebubbles.app/private-api | Helper capabilities; **macOS only** |
 | Client architecture | https://docs.bluebubbles.app/client/build-yourself-contribution-guide/architecture | Flutter layers, Dart socket, isolates |
-| Client “all clients are Flutter/Dart” | https://docs.bluebubbles.app/client | fetched 2026-11-08 |
+| “All clients are Flutter/Dart” | https://docs.bluebubbles.app/client | fetched 2026-11-08 |
 
 **Stable vs alpha (do not mix casually):**
 
 | Piece | Status 2026-11-08 | Use in BaoTime? |
 | --- | --- | --- |
-| BlueBubbles Server v1.9.12 | **Stable** latest | Target. Gate on `server_version` from `/api/v1/server/info`. |
-| BlueBubbles Android v2.1.5 | **Stable** Android APK; desktop already at 2.1.6 | Behaviour reference only |
-| BlueBubbles helper 0.0.21 | Last GitHub tag **2024**; server ships its own dylibs | Mac-side only |
-| AndroidX Lifecycle | **Stable 2.11.0**; 2.12.0-alpha05 exists (docs updated 2026-10-21) | Stay on **2.11.0** (already in `gradle/libs.versions.toml`) |
-| Jetpack DataStore | **Stable 1.3.0** | OK for non-secrets |
-| `androidx.datastore:datastore-tink` | **1.3.0-alpha07** | Do **not** require for v1; keep existing Keystore AES/GCM |
-| `androidx.security.crypto` EncryptedSharedPreferences | **Deprecated** 1.1.0, no further releases ([package summary](https://developer.android.com/reference/androidx/security/crypto/package-summary) last updated 2026-10-28) | Do **not** migrate onto it |
-| OkHttp | **Stable 5.5.1** (Maven Central `lastUpdated` 2026-10-22); 5.0.x alphas are old | Prefer **5.5.1**, not 5.0.0-alpha |
-| AGP | BaoTime already **9.6.0-alpha03** (alpha). BlueBubbles Android uses AGP **9.4.1** with `android.builtInKotlin=false` ([android/CLAUDE.md](https://github.com/BlueBubblesApp/bluebubbles-app/blob/master/android/CLAUDE.md)) | Do not “upgrade” further in FaceTime slices. Note alpha risk separately. |
-| Socket.IO Java client | Must speak **Socket.IO 4** | `io.socket:socket.io-client` 2.1.x line (Engine.IO 4). Verify against 4.7.5 at impl time. |
+| BlueBubbles Server v1.9.12 | **Stable** latest | Target. Gate FaceTime mint/answer/leave on helper + `private_api` + `server_version` from `/api/v1/server/info`. |
+| BlueBubbles Android v2.1.5 | **Stable** Android APK | Behaviour reference only |
+| Helper 0.0.21 | Last GitHub tag **2024**; server ships dylibs | Mac-side only |
+| AndroidX Lifecycle | **Stable 2.11.0**; 2.12.0-alpha05 exists | Stay on **2.11.0** (catalog) |
+| Jetpack DataStore | **Stable 1.3.0** | Optional for **non-secrets** |
+| `androidx.datastore:datastore-tink` | **Stable 1.3.0** (`maven-metadata.xml` `release` 1.3.0; release notes 2026-10-21 list Encryption Support) | **Do not migrate secrets onto it in FaceTime slices.** Keep Keystore for **migration/scope**, not because tink is prerelease |
+| `androidx.security.crypto` EncryptedSharedPreferences | **Deprecated** 1.1.0 | Do **not** migrate onto it |
+| OkHttp | **Stable 5.5.1** (Maven `lastUpdated` 2026-10-22) | Task **12**, after lifecycle |
+| AGP | BaoTime **9.6.0-alpha03** (alpha). BB Android AGP **9.4.1** | Do not take newer alpha APIs for FaceTime slices |
+| Socket.IO Java | **2.1.2** stable | Socket.IO 4 to match server `^4.7.5` |
 
 ## Licence obligations (Apache-2.0)
 
-BlueBubbles app, server, and helper are **Apache License 2.0**. LICENSE blob on both app and server: path `LICENSE` (server blob sha `261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64`). No `NOTICE` file on either repo (404).
+BlueBubbles app, server, and helper are **Apache License 2.0**. LICENSE path `LICENSE` (server blob sha `261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64`). **No NOTICE file** on app @ `ff8bfd5` or server @ `76d2b2e` (GitHub contents API 404).
 
-Apache-2.0 **allows** reproduction and derivative works **if**:
-
-1. Recipients get a copy of the licence.
-2. Modified files carry change notices.
-3. Attribution / NOTICE contents (if any appear later) are preserved.
-4. Patent grant terms are honoured.
+Apache-2.0 **allows** reproduction and derivative works **if** recipients get the licence, modified files carry change notices, NOTICE contents (if any appear later) are preserved, and patent grant terms are honoured.
 
 BaoTime currently has **no licence file**. That is not a grant to ignore Apache-2.0 if we **copy** BlueBubbles source.
 
-### Reuse / copy / extraction vs clean reimplementation
+### Reuse vs rewrite (not a legal certification)
 
-| Approach | Allowed? | Recommendation |
+| Approach | Engineering default | Legal note |
 | --- | --- | --- |
-| Copy Flutter/Dart (`lib/…`) into BaoTime | Technically under Apache-2.0 with attribution; **not runnable** in this Kotlin/View app | **Reject.** Dart is not Kotlin-portable. Flutter engine is out of scope. |
-| Copy Kotlin notification/FCM plugins from `android/app/src/main/kotlin/com/bluebubbles/messaging/` | Allowed with Apache-2.0 NOTICE + LICENSE in BaoTime | **Avoid.** Tied to Flutter `MethodChannel`, `MethodCallHandlerImpl`, BB package ids. |
-| Extract API path strings / event names / JSON field names from public server + client | Facts, not copyrightable as a block; still cite sources | **Do this.** |
-| Clean-room Kotlin: OkHttp + Socket.IO + existing BaoTime UI against documented REST/events | No BB source copied | **Default.** |
-| Vendor helper dylib / IMCore hooks on Android | Meaningless and unsafe | **Forbidden.** |
-| Apple FaceTime native SDK / undocumented WebRTC bypass | Does not exist for Android | **Forbidden.** Rooms stay `https://facetime.apple.com` in the existing WebView. |
+| Copy Flutter/Dart `lib/…` | **Reject.** Not runnable in this Kotlin/View app | Apache-2.0 would still require attribution if copied |
+| Copy Kotlin plugins under `android/app/src/main/kotlin/com/bluebubbles/messaging/` | **Avoid.** Tied to Flutter `MethodChannel` | Copy requires BaoTime LICENSE + attribution **before** that slice |
+| Extract API paths / event names / JSON field names | **Do this.** Cite sources | Facts; still cite |
+| Rewrite Kotlin against public REST/events after reading BB source | **Default engineering approach** | **Not** a certified clean-room. Independent implementation claims need a process this repo has **not** run (separate authors, no source access, etc.) |
+| Vendor helper dylib / IMCore on Android | **Forbidden** | Meaningless and unsafe |
+| Apple FaceTime native SDK / WebRTC bypass | **Forbidden** | Does not exist for Android |
 
-If a later slice *does* copy a BB Kotlin file, stop and add `LICENSE` + attribution **before** merge of that slice.
+**Transitive NOTICE:** adding OkHttp, Socket.IO Java, or FCM later requires recording **those** libraries’ licences (OkHttp Apache-2.0; confirm Socket.IO Java at add time) in Task 14 **before** copy or new third-party code lands. Do not claim “certified clean-room” in README or PRs.
 
 ## What the official Android client actually is
 
-Verified:
-
 - Docs: “All clients are coded in Flutter and Dart.” https://docs.bluebubbles.app/client
-- GitHub language: Dart. `pubspec.yaml` `name: bluebubbles`, SDK `>=3.12.2 <4.0.0`, version `2.1.6+96` on master.
-- FaceTime HTTP: Dart `FaceTimeApi` — **answer** and **leave** only; **no** `session` create in that file.  
-  https://github.com/BlueBubblesApp/bluebubbles-app/blob/master/lib/services/network/api/facetime_api.dart
-- Outgoing web-link create lives on the **server** `POST /api/v1/facetime/session` (BaoTime already calls this). Official Flutter client may still open generated links in **Chrome**, not WebView ([issue 2775](https://github.com/BlueBubblesApp/bluebubbles-app/issues/2775): Flutter WebView support called “terrible”; they force Chrome).
-- Incoming: Socket event `incoming-facetime` → Dart `MessageHandlerSvc` → Kotlin `CreateIncomingFaceTimeNotification` (payload: `call_uuid`, `title`, `body`, `caller`, `caller_avatar`). Answer extra `answer=true` on `MainActivity`.  
-  https://github.com/BlueBubblesApp/bluebubbles-app/blob/master/android/app/src/main/kotlin/com/bluebubbles/messaging/services/notifications/CreateIncomingFaceTimeNotification.kt
-- Socket: `socket_service.dart` sets query `guid=<password>`, transports `websocket` + `polling`, `forceNew`, unlimited reconnect, custom cert adapter. Listens `incoming-facetime` (JSON-decoded) and `ft-call-status-changed`.  
-  https://github.com/BlueBubblesApp/bluebubbles-app/blob/master/lib/services/network/socket_service.dart
-- Native Android also: FCM, UnifiedPush, foreground service to keep socket alive, minSdk **26**, compile/target **36**, Java 21, Gradle 9.8, AGP 9.4.1 ([android/CLAUDE.md](https://github.com/BlueBubblesApp/bluebubbles-app/blob/master/android/CLAUDE.md)).
+- FaceTime HTTP in Dart is **answer** and **leave** only — no session create: [`facetime_api.dart` @ `ff8bfd5`](https://github.com/BlueBubblesApp/bluebubbles-app/blob/ff8bfd5a57a8c6686c50d7b7b03d4ef8a5bded11/lib/services/network/api/facetime_api.dart)
+- Outgoing web-link create is server `POST /api/v1/facetime/session` (BaoTime already calls this). Official Flutter client often opens generated links in **Chrome**, not WebView ([issue 2775](https://github.com/BlueBubblesApp/bluebubbles-app/issues/2775))
+- Socket (`socket_service.dart` @ `ff8bfd5`): query `guid=<password>`, websocket+polling, `forceNew`. **`incoming-facetime` is subscribed on web/desktop only**; comment: *“FCM handles on Android.”* Android still listens to `ft-call-status-changed`.
+- Native: FCM, UnifiedPush, `SocketIOForegroundService` with **`foregroundServiceType="remoteMessaging"`**, minSdk 26, compile/target 36.
 
-BaoTime is the opposite stack: minSdk **29**, compile/target **37**, Java 17 bytecode, View UI, in-app WebView, Keystore password, no Socket.IO, no FCM.
+BaoTime is the opposite stack: minSdk 29, target 37, View UI, in-app WebView, Keystore password, no Socket.IO, no FCM, no FGS.
 
 ## BaoTime current source (this repo)
 
-Inspected 2026-11-08 on branch with README; production code unchanged by this plan.
+Inspected 2026-11-08. Production code **unchanged** by this documentation.
 
 | Area | Today | Gap vs official FaceTime path |
 | --- | --- | --- |
-| HTTP | `HttpURLConnection`, password query param, 6s connect / 25s read | No OkHttp, no 401 vs helper-missing distinction, no answer/leave |
-| Info | `GET /api/v1/server/info` requires `server_version`, `private_api`, `helper_connected`, `detected_imessage` | Does not **gate** FaceTime on helper/private_api before create |
-| Create | `POST /api/v1/facetime/session` `{}` → `data.link` | Matches server `FaceTimeRouter.newSession` |
-| Contacts | `GET /api/v1/contact` | No `POST /contact/query`; no avatars |
-| Incoming | NotificationListenerService scrapes BB/Beeper text for FaceTime URLs | No `call_uuid`; cannot `answer`/`leave`; racey; needs NLS permission |
-| Room | Gated WebView, JS only on FaceTime HTTPS rooms | Keep. This is **better** than BB’s Chrome tab for BaoTime’s product |
-| Auth storage | `SecureStore` AES/GCM AndroidKeyStore `v1:` | Aligns with current Android guidance to use Keystore directly, not deprecated `MasterKey` |
-| Prefs | `SharedPreferences` for URL + ciphertext + history | Fine for non-secrets; DataStore optional later |
-| Tests | JVM router/policy/codec; instrumented tests gated | No socket/FCM tests |
-| TLS | `usesCleartextTraffic=true` for LAN HTTP | Keep LAN HTTP; do not weaken HTTPS |
-| Background | None (no FCM, no FG socket) | Incoming dies when BB notification not visible |
+| HTTP | `HttpURLConnection`, password query, 6s connect / 25s read | No OkHttp, no 401 vs helper-missing, no answer/leave |
+| Info | `GET /api/v1/server/info` requires `server_version`, `private_api`, `helper_connected`, `detected_imessage` | Does not **gate** FaceTime on helper/`private_api`. **`facetime_calling` is not in `getServerMetadata()`** |
+| Create | `POST /api/v1/facetime/session` `{}` → `data.link` | Matches `FaceTimeRouter.newSession` / `FaceTimeInterface.create()` — **no callee** |
+| Contacts | `GET /api/v1/contact` | No `POST /contact/query` |
+| Incoming | `NotificationListenerService` scrapes BB/Beeper text for FaceTime URLs; duplicate keys (64) | No `callUuid`; cannot `answer`/`leave`; `IncomingCallController` is Activity-owned; `onDestroy` **disposes** it |
+| Room | Gated WebView | Keep as product choice; Apple does not name WebView ([compatibility](#webview-compatibility-risk)) |
+| Auth | `SecureStore` AES/GCM Keystore `v1:` | Keep; DataStore-tink is stable but out of scope |
+| Config generation | `AppConfig.connectionRevision` already invalidates in-flight **contacts** | Must also invalidate socket + in-flight answer/leave |
+| Background | None | Incoming dies unless NLS still sees a notification |
+| Tests | JVM router/policy/codec; gated instrumented | No socket/FCM tests |
 
 ## Public REST vs Private API vs Apple
 
-Auth on almost all REST: query `guid` **or** `password` **or** `token` = server password. Official: https://docs.bluebubbles.app/server/developer-guides/rest-api-and-webhooks  
-BaoTime already uses `password=`. Keep one alias; document both.
+Auth on almost all REST: query `guid` **or** `password` **or** `token` = server password. Official: https://docs.bluebubbles.app/server/developer-guides/rest-api-and-webhooks
 
-`HttpRoutes.protected` = metrics/error/log + **AuthMiddleware** + body parser.  
-`PrivateApiMiddleware` = `checkPrivateApiStatus()` or  iMessage-style error “complete Private API setup / helper connected”.  
-https://github.com/BlueBubblesApp/bluebubbles-server/blob/master/packages/server/src/server/api/http/api/v1/middleware/privateApiMiddleware.ts
+`HttpRoutes.protected` = AuthMiddleware. `PrivateApiMiddleware` = `checkPrivateApiStatus()`.
 
-### FaceTime REST (all **Private API** + macOS Monterey+)
+https://github.com/BlueBubblesApp/bluebubbles-server/blob/76d2b2e786c04d7516de089f31be978a68da8083/packages/server/src/server/api/http/api/v1/httpRoutes.ts
 
-Source: https://github.com/BlueBubblesApp/bluebubbles-server/blob/master/packages/server/src/server/api/http/api/v1/httpRoutes.ts (FaceTime group)  
-Router: https://github.com/BlueBubblesApp/bluebubbles-server/blob/master/packages/server/src/server/api/http/api/v1/routers/facetimeRouter.ts  
-Interface: https://github.com/BlueBubblesApp/bluebubbles-server/blob/master/packages/server/src/server/api/interfaces/facetimeInterface.ts  
-Session logic: https://github.com/BlueBubblesApp/bluebubbles-server/blob/master/packages/server/src/server/api/lib/facetime/FaceTimeSession.ts
+### FaceTime REST (group middleware: protected **+ Private API**; macOS Monterey+ in code)
 
-| Method | Path | Auth | Private API | What it does | BaoTime |
-| --- | --- | --- | --- | --- | --- |
-| POST | `/api/v1/facetime/session` | yes | **yes** | Generate outgoing link; Mac `admitAndLeave` (admit self, wait 15s, leave) | **Have** |
-| POST | `/api/v1/facetime/answer/:call_uuid` | yes | **yes** | Answer incoming, generate link, admitAndLeave; returns `{ data: { link } }` | **Missing** |
-| POST | `/api/v1/facetime/leave/:call_uuid` | yes | **yes** | Private API `leaveCall` | **Missing** |
+Router: https://github.com/BlueBubblesApp/bluebubbles-server/blob/76d2b2e786c04d7516de089f31be978a68da8083/packages/server/src/server/api/http/api/v1/routers/facetimeRouter.ts  
+Interface: https://github.com/BlueBubblesApp/bluebubbles-server/blob/76d2b2e786c04d7516de089f31be978a68da8083/packages/server/src/server/api/interfaces/facetimeInterface.ts  
+Session: https://github.com/BlueBubblesApp/bluebubbles-server/blob/76d2b2e786c04d7516de089f31be978a68da8083/packages/server/src/server/api/lib/facetime/FaceTimeSession.ts
 
-macOS floor in interface: `isMinMonterey` (FaceTime create/answer/leave). Helper must be connected.
+`isMinMonterey` is the gate. The `create()` error string still says “Big Sur”; **trust the check, not the string**.
 
-### Related REST useful to BaoTime
+| Method | Path | Private API | What it does | BaoTime |
+| --- | --- | --- | --- | --- |
+| POST | `/api/v1/facetime/session` | **yes** | `FaceTimeInterface.create()` → `fromGeneratedLink(null)` → `admitAndLeave`. **No callee in body** | **Have** |
+| POST | `/api/v1/facetime/answer/:call_uuid` | **yes** | Answer, generate link, admitAndLeave; `{ data: { link } }` | **Missing** |
+| POST | `/api/v1/facetime/leave/:call_uuid` | **yes** | Private API `leaveCall` | **Missing** |
 
-| Method | Path | Private API extra? | Use |
+Server session objects invalidate after **3 hours**. Incoming **UI** must not wait that long (BB Android notification `setTimeoutAfter(30000)`).
+
+### Related REST
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/api/v1/ping` | Auth; BB uses HTTP 401 as bad password |
+| GET | `/api/v1/server/info` | Version, `private_api`, helper, detected handle. **No `facetime_calling`** ([`generalInterface.ts` `@ 76d2b2e`](https://github.com/BlueBubblesApp/bluebubbles-server/blob/76d2b2e786c04d7516de089f31be978a68da8083/packages/server/src/server/api/interfaces/generalInterface.ts)) |
+| GET | `/api/v1/contact` | Have |
+| GET | `/api/v1/handle/availability/facetime?address=` | Route has **no** extra `PrivateApiMiddleware`; **implementation** still `checkPrivateApiStatus()` ([`handleInterface.ts`](https://github.com/BlueBubblesApp/bluebubbles-server/blob/76d2b2e786c04d7516de089f31be978a68da8083/packages/server/src/server/api/interfaces/handleInterface.ts)) |
+
+### Socket events
+
+https://github.com/BlueBubblesApp/bluebubbles-server/blob/76d2b2e786c04d7516de089f31be978a68da8083/packages/server/src/server/events.ts  
+Handler: https://github.com/BlueBubblesApp/bluebubbles-server/blob/76d2b2e786c04d7516de089f31be978a68da8083/packages/server/src/server/api/privateApi/eventHandlers/PrivateApiFaceTimeStatusHandler.ts  
+Flutter mapping: [`action_handler.dart` @ `ff8bfd5`](https://github.com/BlueBubblesApp/bluebubbles-app/blob/ff8bfd5a57a8c6686c50d7b7b03d4ef8a5bded11/lib/services/backend/action_handler.dart)
+
+Server config `facetime_calling` chooses the emit path. It is **not** in `/server/info`. BaoTime must listen to **both**:
+
+| Event | When | Payload | Can REST-answer? |
 | --- | --- | --- | --- |
-| GET | `/api/v1/ping` | no (auth) | Cheap liveness / 401 password check (BB socket uses HTTP 401 to flag bad password) |
-| GET | `/api/v1/server/info` | no extra | Version, `private_api`, helper, detected handle — **have** |
-| GET | `/api/v1/contact` | group auth only | Mac address book — **have** |
-| POST | `/api/v1/contact/query` | group auth only | Targeted lookup |
-| GET | `/api/v1/handle/availability/facetime?address=` | **no extra PrivateApiMiddleware** on this route (iMessage availability **does** add it) | Pre-flight callee; still may need helper in implementation — verify on a real server |
-| GET | `/api/v1/handle/availability/imessage?address=` | **yes** | Out of BaoTime scope unless we show “can iMessage” |
-
-### Socket events (server `events.ts`)
-
-https://github.com/BlueBubblesApp/bluebubbles-server/blob/master/packages/server/src/server/events.ts
-
-**In scope for BaoTime:**
-
-| Event | Why |
-| --- | --- |
-| `incoming-facetime` | Primary incoming signal with `call_uuid` (client JSON-decodes) |
-| `ft-call-status-changed` | answered / incoming / disconnected (`FaceTimeSessionStatus`) |
-
-**Out of scope (iMessage product):** `new-message`, typing, participants, Find My, backups, scheduled messages, etc.
+| `ft-call-status-changed` | `facetime_calling` true | `{ uuid, status, status_id, address, handle, is_audio, is_video, … }` (`uuid` aliased from `call_uuid`). Incoming = `status_id` **4**; disconnected = **6** | **Yes**, if `uuid` present |
+| `incoming-facetime` | `facetime_calling` false (legacy). Flutter: “legacy incoming FaceTime” | JSON **string** `{ caller, timestamp }` — **no uuid** | **No**. Fail-safe: UI-only or ignore; NLS URL path may still join a link |
 
 Handshake: query `guid=<server password>`, websocket+polling, Socket.IO 4.
 
-### FCM / UnifiedPush / webhooks
-
-- Server FCM service exists for device push when the app is killed.
-- Webhooks (server ≥ 1.0.0) POST selected events to a URL — **not usable on a phone** without a public endpoint.
-- UnifiedPush exists in BB Kotlin (`UnifiedPushHandler.kt`) for de-Googled devices.
-
-BaoTime slice 1: Socket while process alive. Slice later: FCM **optional**. Keep NLS scrape as last-resort fallback, then retire it.
+`emitMessage` (server `index.ts`): `socketServer.emit` + optional FCM + webhook. **No per-socket replay buffer.**
 
 ### Not proposed
 
-- Native Apple FaceTime on Android.
-- Joining FaceTime via undocumented Apple APIs / MITM.
-- Shipping helper bundles.
-- Full chat, reactions, typing, Find My, Mac lock, server update install from the phone.
-- Copying Flutter UI / ObjectBox / GetX.
+Native Apple FaceTime on Android; MITM; helper bundles; full chat; copying Flutter; FGS type claimed eligible without Task 10.
+
+## Call lifecycle contract
+
+Authoritative for Tasks 4–7. Implementation is future; this is the spec those tasks must not violate.
+
+### Identity
+
+Every invite/session is keyed by:
+
+| Field | Source | Role |
+| --- | --- | --- |
+| `callUuid` | `ft-call-status-changed.uuid` (preferred). Null for legacy `incoming-facetime` and for NLS URL-only | REST answer/leave; status correlation |
+| `faceTimeUrl` | NLS extract or answer `data.link` | WebView join; NLS dedup |
+| `configGeneration` | `AppConfig.connectionRevision` at invite start | Drop work after Settings save |
+| `inviteGeneration` | Process-monotonic counter | Cancel in-flight HTTP; ignore late responses |
+| `source` | `SocketCalling` / `SocketLegacy` / `NlsUrl` / `Fcm` (Fcm only if Task 11) | Dedup + capability |
+
+Dedup key: `callUuid` if present, else `faceTimeUrl` if present, else weak `caller|timestamp-bucket` for legacy. Same key from socket + NLS + FCM = **one** invite.
+
+### Process vs Activity
+
+| Owner | Lives where | Teardown |
+| --- | --- | --- |
+| Socket + lifecycle store | **Process** (Application-scoped, not `MainActivity`) | Disconnect on **configGeneration** change or process death — **not** on Activity `onDestroy` |
+| Incoming overlay + WebView | Activity | `onDestroy` unbinds UI only; does not answer/leave by itself; does not kill the socket |
+
+Today `MainActivity.onDestroy` calls `incomingCalls.dispose()` and `callSessions.closeSession()`. Future code must not interpret that as “tear down the socket.” `singleTask` + `onNewIntent` must **rebind** UI to the store, not start a second socket.
+
+### States (one incoming uuid at a time unless a later product rule allows barge-in)
+
+```mermaid
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> Ringing: uuid invite or URL-only NLS
+  Ringing --> Answering: Accept and uuid present
+  Ringing --> JoiningUrl: Accept and URL-only no uuid
+  Ringing --> Declining: Decline and uuid present
+  Ringing --> Terminal: expiry or status disconnected or config bump
+  Answering --> Connecting: HTTP 200 link and generations still match
+  Answering --> Terminal: cancel hangup decline config expiry or late drop
+  Connecting --> InRoom: WebView loaded
+  JoiningUrl --> InRoom: existing room gate
+  InRoom --> Terminal: user hangup
+  Declining --> Terminal: leave best-effort
+  Terminal --> Idle: store cleared
+```
+
+Terminal reasons: `Declined`, `Missed`, `Disconnected`, `Expired`, `CancelledByConfig`, `Failed`, `Completed`. Terminal is **idempotent**: further HTTP/socket for that `inviteGeneration` is ignored.
+
+Local ringing expiry: **30s** (BB `CreateIncomingFaceTimeNotification.setTimeoutAfter(30000)`), not the server’s 3-hour session invalidate.
+
+### Required scenario table
+
+| Scenario | Required behaviour |
+| --- | --- |
+| Wrong-call disconnect | `status_id=6` for uuid **A** does not dismiss/answer uuid **B** |
+| Wrong-call answer | Accept only posts `/answer/{activeUuid}`; never a previous uuid |
+| Hangup / Decline while answer HTTP pending | Cancel the coroutine/`Call.Factory` call; if the HTTP already succeeded on the Mac, best-effort `/leave/{uuid}`; **do not** open WebView |
+| Late HTTP after Decline | `inviteGeneration` mismatch → drop body; no room, no Recents join |
+| Late HTTP after config save | `configGeneration` mismatch → drop; reconnect socket with new password/URL |
+| Activity recreation | `onNewIntent` / new Activity rebinds to the same store; no second overlay for the same key |
+| Process death | Store gone. **Fail-safe:** ringing invite is lost. Socket.IO will not replay it |
+| Stale invite | 30s local expiry → `Expired` / missed Recents; optional leave if uuid still known |
+| Push/socket/NLS overlap | One overlay; NLS URL-only **upgrades** to uuid if a later socket event supplies it |
+
+### Reconnect is not replay
+
+Socket.IO v4 default is **at most once**: a disconnected client does not receive events the server emitted while it was down; the server does not buffer them.
+
+https://socket.io/docs/v4/delivery-guarantees/
+
+BlueBubbles `emitMessage` is a live `socketServer.emit` (plus optional FCM/webhook). There is **no** client offset / missed-event API for FaceTime.
+
+**Supported reconciliation:** status events **while connected**; local expiry; NLS if a URL is visible; optional FCM if Task 11 exists.
+
+**Fail-safe limitation:** after disconnect, missed call events are gone. Do not invent replay. Do not treat reconnect as “catch up.” Settings should not promise otherwise.
+
+### HTTP client
+
+Tasks 4–7 may keep `HttpURLConnection` (or a thin façade). **Do not** swap to OkHttp until Task 12. Cancellation must still be designed (coroutine `Job` + disconnect) so Task 12 does not invent lifecycle.
+
+## Availability is advisory
+
+`FaceTimeRouter.newSession` ignores the request body. `FaceTimeInterface.create()` has no handle argument. BaoTime already mints a **shareable link** and uses the typed handle only as a local label.
+
+`GET /api/v1/handle/availability/facetime?address=` may still fail when the helper is down (`checkPrivateApiStatus()` inside `HandleInterface.getFacetimeAvailability`). That must **not** block generic create. Show an advisory if the route returns `available: false`. Only a **human-approved product rule** may later block create.
+
+Helper/`private_api`/version still gate **whether minting can work at all** (Task 3). That is capability of *this Mac*, not of the callee.
+
+## Foreground service eligibility
+
+Android 14+ requires an FGS type. Retrieved 2026-11-08:
+
+https://developer.android.com/develop/background-work/services/fgs/service-types  
+https://developer.android.com/develop/background-work/services/fgs/timeout
+
+| Type | What the docs say | Fits BaoTime call socket? |
+| --- | --- | --- |
+| `remoteMessaging` | “Transfer **text messages** from one device to another” (continuity when switching devices) | **Not proven.** BB Android uses it for `SocketIOForegroundService` because it is an iMessage client. BaoTime is not that product |
+| `dataSync` | Upload/download/backup/import/fetch. Android 15+: **6 hours / 24 hours** then `onTimeout` | **Not** an always-on signaling socket. Timeout makes it unfit |
+| `shortService` | ~3 minutes | Unfit for waiting for calls |
+| `phoneCall` | Ongoing call via `ConnectionService`; `MANAGE_OWN_CALLS` or `ROLE_DIALER` | BaoTime is **not** the default dialer and does not use Telecom `ConnectionService` today |
+| `microphone` / `camera` | Continue capture from background; while-in-use start rules | Only while an **active room** holds media — not for idle invite listening |
+| `specialUse` | Play Console explanation required | Possible **if** a human files a policy case; not assumed |
+
+**Default boundary (M2–M3): no FGS.** Socket runs while the process is alive (user recently opened BaoTime). Incoming while the process is dead relies on NLS scrape (URL-only) or a later approved push path.
+
+If Task 10 later chooses FGS, it must name: type, `startForeground` permission, timeout behaviour, full-screen intent policy, and **sideload vs Play**. Until then, **do not pretend eligibility**.
+
+Full-screen intents: BaoTime already declares `USE_FULL_SCREEN_INTENT`. Apps targeting API 34+ are limited to calling/alarms; Play may revoke the default. Check `NotificationManager.canUseFullScreenIntent` in a future implementation; `ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT` for the settings jump.
+
+https://developer.android.com/about/versions/14/behavior-changes-14 (last updated 2026-10-28)
+
+## Android process states for incoming
+
+Do not collapse these in tests or copy.
+
+| State | Socket (no FGS) | NLS scrape | FCM (if Task 11) |
+| --- | --- | --- | --- |
+| Foreground | Yes if connected | Yes | Yes |
+| Background (Home, another app) | Until process freeze/kill | If BB/Beeper still posts | Typical |
+| Swipe away from Recents | Process may die (OEM-dependent) | If listener still bound | Often yes; OEM variance |
+| OS process kill (memory) | Dead; **no replay** | If system restarts the listener | Often yes |
+| **Force-stop** (Settings) | Dead | Listener stopped | **No delivery until user reopens the app** |
+| Reboot | Dead until user opens app (no FGS/BOOT) | After NLS rebound | After FCM registration; still not after a later force-stop |
+
+Force-stop recovery: user launches BaoTime once. Document that as the **accepted limitation**, not as a failed test.
+
+https://firebase.google.com/docs/cloud-messaging/flutter/receive
+
+## Secrets and DataStore
+
+Keep `SecureStore` (Keystore AES/GCM `v1:`):
+
+1. Already implemented and tested (`CredentialStoreTest` under `auditFixture`).
+2. Password is a single secret; DataStore-tink would be a **migration** of ciphertext + key alias with no FaceTime feature gain.
+3. `EncryptedSharedPreferences` remains deprecated.
+
+`datastore-tink` **1.3.0 is stable**. Do not repeat the stale alpha claim. Optional DataStore 1.3.0 for **non-secrets** (favorites, URL) is still not on the FaceTime critical path.
+
+## WebView compatibility risk
+
+Apple: “Join a FaceTime call from an Android or Windows device” requires the **latest Google Chrome or Microsoft Edge**. Published **2026-05-29**.
+
+https://support.apple.com/en-us/109364
+
+BaoTime’s gated WebView is **not** on that list. Keeping it is a product choice (in-app room, URL gate, PiP). It is **not** proof of Apple-supported compatibility. Official BB often opens Chrome because Flutter WebView was called “terrible” (issue 2775).
+
+Task 13 is a **planned** real-device matrix (admission, camera, mic, navigation, reconnect, PiP). **Not executed** in this documentation PR.
 
 ## Latest Android / Kotlin patterns (verified 2026-11-08)
 
-Context7 quota was exhausted this run; used Android Developers + Maven Central + BB’s own AGP notes.
-
 | Topic | Verified pattern | BaoTime action |
 | --- | --- | --- |
-| Networking | OkHttp **5.5.1** stable | Replace `HttpURLConnection` behind the existing `BlueBubblesClient` façade |
-| TLS | HTTPS with system trust; user certs only if we add a settings toggle (BB has `WebsocketAdapter` for user certs) | Keep LAN HTTP explicit; no custom trust by default |
-| Async | Kotlin coroutines; Lifecycle **2.11.0** `lifecycle-runtime-ktx` (`repeatOnLifecycle`) | Socket + HTTP as Flows; collect in Activity `STARTED`/`RESUMED`; no GetX |
-| State | `StateFlow` / `SharedFlow` (not LiveData for new code) | Connection + incoming call as flows |
-| Secrets | Keystore AES/GCM already; EncryptedSharedPreferences **deprecated** | Keep `SecureStore`; never log password; still query-param auth (server constraint) |
-| Prefs | DataStore 1.3.0 stable for non-secrets | Optional; not blocking FaceTime slices |
-| Background | Android 14+ FG service **types**; 15+ restrictions; FCM high-priority for calls | Socket FG service only if product requires killed-app incoming; type `remoteMessaging`/`dataSync` per current FGS docs at impl time |
-| Observability | Structured logs, no PII | `Log` tags `BaoTime/Http`, `BaoTime/Socket`; never log `guid` query |
-| Tests | OkHttp `MockWebServer` (JVM); instrumented for Keystore/socket optional | Extend `app/src/test` first |
-
-BaoTime AGP 9.6.0-alpha03 is **alpha**. FaceTime work must not depend on newer alpha APIs. Flutter BB’s `builtInKotlin=false` does not apply: BaoTime already uses AGP built-in Kotlin without `org.jetbrains.kotlin.android`.
+| Networking | OkHttp **5.5.1** stable | Task **12**, after lifecycle |
+| TLS | System trust; LAN HTTP already explicit | No custom trust by default |
+| Async | Coroutines; Lifecycle **2.11.0** | Flows; collect in Activity for **UI**; socket in process scope |
+| State | `StateFlow` | Connection + invite in the lifecycle store |
+| Secrets | Keystore; EncryptedSharedPreferences deprecated; DataStore-tink **stable** but unused | Keep `SecureStore` |
+| Background | FGS types + timeouts as above | Foreground-only until Task 10 |
+| Observability | Structured logs, no PII | Never log `guid`/`password` query |
+| Tests | MockWebServer later; JVM first | No instrumented requirement for Tasks 1–9 |
 
 ## Architecture decisions
 
-1. **Clean-room Kotlin client.** Consume REST + Socket.IO. Do not import Flutter modules.
-2. **Stay a FaceTime-web app.** Recents / Contacts / WebView remain. iMessage inbox is out.
-3. **Incoming path:** Socket `incoming-facetime` → existing `IncomingCallController` → on Accept `POST .../facetime/answer/:call_uuid` → existing room WebView. Decline → `POST .../leave/:call_uuid` (best effort) + missed Recents row.
-4. **Keep WebView room gate.** Do not switch to Chrome like BB.
-5. **Version gate:** refuse FaceTime create/answer if `private_api` or `helper_connected` is false, or `server_version` &lt; 1.9.0 (conservative; session API is older, but we target 1.9.12). Surface existing banners.
-6. **NLS scrape stays until socket+answer is proven**, then becomes fallback only.
-7. **No FCM in the first milestone** (Play Services, server Firebase config). Document as optional M4.
-8. **OkHttp + Socket.IO 4**, password still query `guid`/`password` because that **is** the public API.
-9. **Secrets stay in Keystore.** Do not adopt EncryptedSharedPreferences. DataStore-tink is alpha — skip.
-10. **Licence:** no BB source copied in these slices → no Apache file required yet. If copy happens, add LICENSE first.
+1. Do not import Flutter modules. Do not claim certified clean-room.
+2. Stay a FaceTime-web app.
+3. **One CallLifecycle store**; Tasks 4–7 implement it; OkHttp after.
+4. Incoming: prefer `ft-call-status-changed` uuid → Accept → `POST /facetime/answer/:uuid` → existing WebView. Legacy `incoming-facetime` cannot answer. NLS URL-only stays join-link fallback.
+5. Keep WebView gate; document Apple Chrome/Edge risk.
+6. Version/helper gate for mint/answer/leave (Task 3). Availability does not block generic create.
+7. NLS stays until socket+answer is proven, then fallback only.
+8. No FCM in M2. No FGS in M2.
+9. Secrets stay in Keystore for migration/scope.
+10. Licence inventory (Task 14) before any BB source copy or new third-party library landing in an implementation PR.
 
-## Feature priority (BaoTime-shaped)
+## Feature priority
 
 | P | Feature | Why | Depends |
 | --- | --- | --- | --- |
-| P0 | Typed HTTP + ping/401 + version/helper gate | Fail fast; foundation | — |
-| P0 | Socket connect/reconnect + `incoming-facetime` | Real `call_uuid`; replaces scrape | P0 HTTP |
-| P0 | REST answer → WebView | Completes incoming | Socket |
-| P1 | REST leave + `ft-call-status-changed` | Correct hangup / missed | Answer |
-| P1 | FaceTime availability on New Call | Avoid doomed creates | HTTP |
-| P2 | Contact query / refresh on revision | Already partly there | HTTP |
-| P2 | Observability + MockWebServer tests | Regression | HTTP/socket |
-| P3 | Optional FCM/UnifiedPush | Killed-app incoming | Server Firebase + user Play Services |
-| P3 | Optional FG socket service | Process death | Product decision |
-| Drop | iMessage chat, reactions, Find My, Chrome handoff | Not BaoTime | — |
+| P0 | Fixtures + lifecycle contract | Auditor HIGH; foundation | — |
+| P0 | Helper/Private API/version gate | Fail fast | Fixtures |
+| P0 | Process-wide socket + no replay | Real uuid; Activity must not own socket | Lifecycle |
+| P0 | Ingress + dedup + answer with cancellation | Completes incoming | Socket |
+| P1 | Leave + status + hangup-while-pending | Hygiene | Answer |
+| P1 | Availability **advisory** | UX, not a create gate | Gate |
+| P2 | Tests/logs | Regression | Answer/leave |
+| P2 | OkHttp 5.5.1 | Library hygiene | Lifecycle already in |
+| P3 | FGS/push decision | Optional | Human |
+| P3 | WebView matrix; licence inventory | Honesty / legal | Human |
 
 ## Milestones
 
-**M0 — Contract (this plan).** Human approves slices.
+**M0 — Contract (these docs).** Human approves slices.
 
-**M1 — HTTP spine.** OkHttp client, ping, stricter info, create still works.
+**M1 — Capability + lifecycle store** (Tasks 1–3). Still `HttpURLConnection`. Create-link unchanged except helper gate.
 
-**M2 — Live incoming.** Socket + answer + existing incoming UI + WebView.
+**M2 — Live incoming** (Tasks 4–6) under the lifecycle contract. Foreground/process-alive only.
 
-**M3 — Call hygiene.** Leave, status events, availability, NLS fallback labelled.
+**M3 — Hygiene** (Tasks 7–9). Leave, advisory availability, tests.
 
-**M4 — Optional push / FG.** Only if M2 incoming fails when backgrounded.
+**M4 — Optional** OkHttp (12), background/push (10–11), WebView matrix (13), licence (14).
 
-Each milestone leaves assembleDebug + `:app:test` green.
+Each **implementation** milestone (not this docs PR) should leave `:app:test` + `assembleDebug` green. This revision does **not** run those.
+
+## Dependency / acceptance / verification / risks / gates
+
+| Task | Depends on | Acceptance (short) | Verification (when implemented) | Risks / gates |
+| --- | --- | --- | --- | --- |
+| 1 Fixtures | — | Redacted ping/info + both event shapes | File review vs server sources | Need a real Mac or captured samples |
+| 2 Lifecycle contract | 1 | Store + generations + cancellation API specified **and** (in impl) unit-tested without OkHttp | JVM state-machine tests | **Gate:** no socket/OkHttp merge without this |
+| 3 Capability gate | 1 | No create/answer HTTP when helper/private_api false | Fixture tests | Do not wait 25s |
+| 4 Socket | 2, 3 | Process-wide; config bump reconnects; **reconnect ≠ replay** | Manual connect/401; unit wrapper | Activity `onDestroy` must not disconnect |
+| 5 Ingress | 4 | uuid overlay; dedup; legacy/NLS fail-safes | Parser tests; one-overlay manual | Two events / two transports |
+| 6 Answer | 2, 5 | Generations match or drop; cancel on hangup | MockWebServer + cancel tests | `admitAndLeave` race remains |
+| 7 Leave/status | 6 | Wrong uuid ignored; pending hangup defined | Status enum tests | Best-effort leave |
+| 8 Availability | 3 | Advisory only; create still works | Mock true/false/500 | Helper-down 5xx |
+| 9 Tests/logs | 6–8 | No password in logs | `:app:test` | — |
+| 10 Background design | 7–9 checkpoint | Written type/start/timeout/FSI/distribution **or** foreground-only | Human sign-off | Play policy |
+| 11 Push | 10 yes | Process-state matrix; force-stop = limitation | Documented force-stop recovery | GMS / OEM |
+| 12 OkHttp | 2 **and** 7 preferred | Façade unchanged; redaction | `:app:test` | **Blocked on Task 2** |
+| 13 WebView matrix | — | Planned table filled later | Real devices | Apple Chrome/Edge |
+| 14 Licence | before any copy | NOTICE inventory | Diff review | No fake clean-room |
+
+**Hard gates**
+
+1. Task 2 before Tasks 4–7 merge and before Task 12.
+2. Task 10 written decision before any FGS/FCM code.
+3. Task 14 before copying BB sources or adding third-party libraries in an implementation PR.
+4. No Apple native FaceTime.
 
 ## Risks and mitigations
 
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
-| Flutter source mistaken for copy-paste Kotlin | High | Clean-room; cite paths only |
-| Private API / Monterey / helper missing | High | Gate on `/server/info`; typed errors |
-| `admitAndLeave` race (Mac leaves before Android joins) | High | Known BB issue ([helper#38](https://github.com/BlueBubblesApp/bluebubbles-helper/issues/38), [server#601](https://github.com/BlueBubblesApp/bluebubbles-server/issues/601)). Keep WebView; open link immediately after `answer`; do not add Apple-side hacks |
-| Socket.IO version skew | Med | Pin client to Socket.IO 4 / server 4.7.5 |
-| Password in query string | Med | Server-mandated; HTTPS on non-LAN; never log URL |
+| Flutter mistaken for copy-paste Kotlin | High | Do not copy; Task 14 if anyone pastes |
+| “Clean-room” overclaim | High | Language in this plan; no certification |
+| Private API / helper missing | High | Task 3 |
+| `admitAndLeave` race | High | Known ([helper#38](https://github.com/BlueBubblesApp/bluebubbles-helper/issues/38), [server#601](https://github.com/BlueBubblesApp/bluebubbles-server/issues/601)). Open link immediately after answer; no Apple-side hacks |
+| Socket reconnect expected to replay | High | Explicit limitation; NLS/FCM only other paths |
+| `remoteMessaging` Play rejection | Med | Do not ship that type without Task 10 |
+| Password in query string | Med | Server-mandated; HTTPS off-LAN; never log URL |
+| WebView vs Chrome/Edge | Med | Task 13; do not claim Apple support |
 | AGP 9.6 alpha | Med | No extra alpha deps |
-| FCM on Graphene / no GMS | Med | Socket + NLS first; UnifiedPush only if requested |
-| Apache-2.0 if someone pastes BB Kotlin | Med | Review diffs; no Flutter `MethodChannel` types |
-| `availability/facetime` may still need helper | Low | Probe on real server in Task 8 |
-| Local Mac `tasks/` conflict | Med | Parent must not overwrite an in-flight plan at `/Users/brandon/Downloads/facetime_android` |
+| Local Mac `tasks/` conflict | Med | Parent must not overwrite an unrelated plan at `/Users/brandon/Downloads/facetime_android` |
 
 ## Open questions (human)
 
-1. Is killed-app incoming required in M2, or is “app open / recent” enough?
-2. Keep Beeper NLS scrape after socket works?
-3. Will BaoTime take a licence (Apache-2.0 to match BB, or other) before any copy?
+1. Is process-alive incoming enough for M2?
+2. Keep Beeper NLS after socket works?
+3. Will BaoTime take a licence before any copy?
 4. Minimum server: 1.9.12 only, or also 1.9.9?
-5. User certs / cleartext: stay as today?
+5. Approve availability as a **create blocker**? Default **no**.
+6. Sideload-only vs Play (FGS/FSI declarations)?
 
 ## Task list (index)
 
 Full criteria in [`todo.md`](todo.md).
 
-### Phase 1: Foundation
-- [ ] Task 1: Record API/version fixtures from `/server/info` + ping
-- [ ] Task 2: OkHttp client behind existing façade (create+info still work)
-- [ ] Task 3: Gate FaceTime on helper/private_api/version
+### Phase 1: Contract and capability
+
+- [ ] Task 1: Fixtures (ping, info, both FaceTime event shapes)
+- [ ] Task 2: Authoritative CallLifecycle (generations, cancellation, expiry)
+- [ ] Task 3: Gate FaceTime on helper / Private API / version
 
 ### Checkpoint: Foundation
-- [ ] `:app:test` + assembleDebug; create-link path unchanged on a helper-up Mac
 
-### Phase 2: Live incoming
-- [ ] Task 4: Socket.IO 4 connection + auth + reconnect Flow
-- [ ] Task 5: Handle `incoming-facetime` → existing incoming UI (`call_uuid`)
-- [ ] Task 6: `POST /facetime/answer/:call_uuid` → WebView
+- [ ] Lifecycle tests; create-link still works when helper is up; **no OkHttp yet**
+
+### Phase 2: Live incoming (existing HTTP client)
+
+- [ ] Task 4: Process-wide Socket.IO 4; reconnect ≠ replay
+- [ ] Task 5: Ingress + dedup (`ft-call-status-changed`, legacy, NLS)
+- [ ] Task 6: Answer with cancellation → WebView
 
 ### Checkpoint: Incoming
-- [ ] Accept from socket-driven UI joins a room; NLS still works as fallback
+
+- [ ] Foreground uuid-answer works; late/hangup/config cases from Task 2 hold; NLS fallback remains
 
 ### Phase 3: Hygiene
-- [ ] Task 7: leave + `ft-call-status-changed`
-- [ ] Task 8: FaceTime availability on New Call
-- [ ] Task 9: MockWebServer + socket unit tests; structured logs
 
-### Checkpoint: Hygiene
-- [ ] Decline/leave; unavailable handle; no password in logs
+- [ ] Task 7: Leave + status; hangup-while-pending
+- [ ] Task 8: Availability **advisory**
+- [ ] Task 9: Tests and redacted logs
 
-### Phase 4: Optional
-- [ ] Task 10: Decide FCM vs UnifiedPush vs FG socket (design only until approved)
-- [ ] Task 11: If approved, FCM/UnifiedPush payload → same incoming UI
+### Phase 4: Optional / honesty
 
-### Checkpoint: Complete
-- [ ] Human review; no Flutter sources in tree; README still accurate
+- [ ] Task 10: Background/FGS/FSI written decision
+- [ ] Task 11: FCM/UnifiedPush only if 10 says so (force-stop limitation)
+- [ ] Task 12: OkHttp 5.5.1 (**after** Task 2)
+- [ ] Task 13: WebView compatibility matrix (planned)
+- [ ] Task 14: Licence/NOTICE inventory before copy
+
+## What this revision verified
+
+| Check | This revision |
+| --- | --- |
+| App assemble / `:app:test` / instrumented | **Not run** (documentation-only request) |
+| Markdown anchors in new `tasks/` files | To be checked statically after write |
+| Mermaid in this file | Static parse only (planned) |
+| Authenticated GitHub README blob / Mermaid | **UNVERIFIED** |
+| GitHub Desktop CLI topics | **Not set; unverified** |
+| Accessibility / runtime / Apple certification | **None** |
+| Upstream pins, router, events, FGS docs, DataStore maven, Socket.IO delivery, Apple 109364, FCM force-quit | Fetched **2026-11-08** |
+
+Prior README badge/Mermaid Chrome preview (unauthenticated shields + local mermaid) is **not** github.com authenticated rendering.
 
 ## Local transfer note
 
-This agent **cannot** write `/Users/brandon/Downloads/facetime_android`. Copies also live under `/opt/cursor/artifacts/tasks/`. Parent copies `tasks/plan.md` and `tasks/todo.md` only. **Do not** overwrite that folder’s README. **Do not** copy if that folder already has an **unchecked** plan for other work — resolve the conflict first.
-)
+This agent **cannot** write `/Users/brandon/Downloads/facetime_android`. Copies also live under `/opt/cursor/artifacts/tasks/`. Parent copies `tasks/*.md` only. **Do not** overwrite that folder’s README. **Do not** copy if that folder already has an **unchecked** plan for other work — resolve the conflict first.
