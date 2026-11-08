@@ -35,4 +35,4 @@ Every HIGH and MED item above is accepted. No finding is dismissed. Where the pr
 
 Auditor re-review of `b26303387f2c36cd295e27b64b38bcea4e9a7b73`: remaining HIGH/MED from `29ff359` reported **closed for planning** by that review; this revision answers the remaining **MEDIUM identity contradiction (A11)** and **LOW metadata copy (A10)**. This agent does **not** record a final auditor green verdict.
 
-Frozen docs commit for this identity/metadata correction: recorded as git HEAD on `cursor/source-grounded-readme-001e` after push (see PR). Parent under first review: `29ff359a2d8fde8366be980c2c6d089d8fdb9385`. Prior docs tip: `b26303387f2c36cd295e27b64b38bcea4e9a7b73`.
+Frozen docs commit for this identity/metadata correction: `c7f66860b225e123a6be5c03a437f89252c09eb5`. Parent under first review: `29ff359a2d8fde8366be980c2c6d089d8fdb9385`. Prior docs tip: `b26303387f2c36cd295e27b64b38bcea4e9a7b73`.
