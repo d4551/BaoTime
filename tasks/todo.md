@@ -58,7 +58,7 @@ Task 2 (lifecycle) **precedes** Task 12 (OkHttp). Tasks 4/5/7 implement Task 2; 
 - [ ] Late HTTP for a completed `inviteGeneration` cannot open a WebView or write a joined Recents row
 - [ ] Decline/hangup while answer is pending cancels the request; if answer already succeeded, best-effort leave; WebView does not load
 - [ ] `status_id=6` for uuid A does not affect uuid B
-- [ ] Dedup key: uuid, else FaceTime URL, else weak legacy caller+time
+- [ ] Same-uuid duplicates (both events carry the same non-null uuid) collapse to one invite; NLS URL-only is a **separate** identity from socket uuid (no time/proximity/caller-window attach). Unrelated uuid while NLS overlay is showing replaces the overlay without merging identities (NLS missed/declined on its own; no answer/leave of that URL with the new uuid)
 - [ ] JVM tests cover the table in the plan (no device required)
 - [ ] Socket reconnect is **not** treated as event replay (document limitation in code comment citing Socket.IO delivery guarantees)
 
@@ -162,10 +162,11 @@ Task 2 (lifecycle) **precedes** Task 12 (OkHttp). Tasks 4/5/7 implement Task 2; 
 **Acceptance criteria:**
 
 - [ ] Calling-mode event shows Accept/Decline without Notification Listener
-- [ ] Duplicate uuid (socket retried, NLS, later FCM) does not stack overlays
+- [ ] Duplicate **same uuid** from transports that **include that uuid** (socket retry, FCM payload with uuid) does not stack overlays. URL-only NLS is **not** a uuid duplicate
 - [ ] Legacy event without uuid does **not** call `/facetime/answer`; fail-safe documented (UI-only or ignore)
 - [ ] NLS URL path still functions if socket did not fire
-- [ ] NLS URL-only invite **upgrades** if a later uuid event matches the same caller window only when a documented matcher exists; otherwise keep them separate (prefer uuid)
+- [ ] NLS URL-only and a later socket uuid stay **separate** unless a documented matcher uses a shared identifier both events actually carry (socket calling payload has uuid+address, no room URL). **Never** attach an unrelated uuid by time, proximity, or caller-window. Prefer uuid for REST answer
+- [ ] Unrelated uuid while an NLS invitation is displayed: do not merge; replace the overlay with the uuid invite; NLS terminates as its own missed/declined identity; do not POST answer/leave using that uuid for the NLS URL
 
 **Verification:**
 

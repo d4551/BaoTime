@@ -433,6 +433,6 @@ What was actually checked for this README and the `tasks/` docs, versus what is 
 | Mermaid in [`tasks/plan.md`](tasks/plan.md) (planned CallLifecycle) | Static syntax check only in the documentation revision. **Not** runtime. |
 | App `assembleDebug` / `:app:test` / instrumented | **Not run** for the documentation-only follow-ups. Commands above are what the tree exposes, not a pass claim. |
 | Accessibility, Apple HIG, FaceTime WebView compatibility | **Not certified.** Task 13 is planned. |
-| GitHub repo description / topics via `gh` | **Proposed only; not set.** Desktop CLI topic list **unverified**. |
+| GitHub repo description / topics | **Set** (parent, via Mac `gh`; this agent did not change settings). Live API 2026-11-08: `private: true`, `homepage: null`, description `Android client that creates and joins FaceTime web links through a personal BlueBubbles Mac server`, topics `android`, `kotlin`, `facetime`, `bluebubbles`, `imessage`, `webview`, `gradle`. **Desktop CLI registration still unverified.** |
 | Design `scripts/audit_design.py` | Narrow source/icon provenance; not runtime certification. |
 )

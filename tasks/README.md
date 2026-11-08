@@ -4,7 +4,7 @@ Planning and audit docs only. No application code lives here.
 
 | Document | Role |
 | --- | --- |
-| [`plan.md`](plan.md) | Source-backed ingest plan: pins, licence, public vs Private API, call lifecycle contract, FGS/push boundaries, WebView compatibility risk, milestones |
+| [`plan.md`](plan.md) | Source-backed ingest plan: pins, licence, public vs Private API, call lifecycle (same-uuid vs NLS URL-only **separate** identities), FGS/push, WebView risk, milestones |
 | [`todo.md`](todo.md) | Dependency-ordered tasks with acceptance, verification, files, gates |
 | [`audit-resolution.md`](audit-resolution.md) | Code Auditor finding → resolution → document location |
 

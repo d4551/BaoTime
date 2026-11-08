@@ -193,7 +193,20 @@ Every invite/session is keyed by:
 | `inviteGeneration` | Process-monotonic counter | Cancel in-flight HTTP; ignore late responses |
 | `source` | `SocketCalling` / `SocketLegacy` / `NlsUrl` / `Fcm` (Fcm only if Task 11) | Dedup + capability |
 
-Dedup key: `callUuid` if present, else `faceTimeUrl` if present, else weak `caller|timestamp-bucket` for legacy. Same key from socket + NLS + FCM = **one** invite.
+**Same-uuid duplicates vs cross-source correlation are different rules.**
+
+| Kind | When it applies | Behaviour |
+| --- | --- | --- |
+| Same-uuid duplicate | Two events both carry the **same non-null** `callUuid` (socket retry, second `ft-call-status-changed`, FCM payload that includes that uuid) | **One** invite / one overlay |
+| Intra-source URL key | Two NLS notifications with the same FaceTime URL (today’s `IncomingCallController` / listener `seenKeys`) | One NLS invite |
+| Intra-source weak key | Two **legacy** `incoming-facetime` `{ caller, timestamp }` events only | Optional collapse inside that source |
+| Cross-source (NLS URL-only ↔ socket uuid) | NLS has a room **URL** and no uuid. Calling-mode socket has **uuid + address**, **no room URL** | **Not the same identity.** Do **not** join them |
+
+The UUID → URL → weak-key fallback is **only** how to pick a key **inside one event**. It does **not** prove two events from different sources are the same call.
+
+**Fail-safe matcher guard (authoritative):** NLS URL-only **must not** upgrade or attach a later uuid by time, proximity, or caller-window. A future matcher is allowed only if it uses an **actual shared identifier both events carry**. These two sources do not: [`PrivateApiFaceTimeStatusHandler.ts` `@ 76d2b2e` L85–L101](https://github.com/BlueBubblesApp/bluebubbles-server/blob/76d2b2e786c04d7516de089f31be978a68da8083/packages/server/src/server/api/privateApi/eventHandlers/PrivateApiFaceTimeStatusHandler.ts#L85-L101) (`uuid`, `address`, status — no `url`); BaoTime NLS is URL-only (`IncomingCallController` 24–54). Prefer uuid for REST answer. Keep the NLS URL invite separate.
+
+**Unrelated uuid while an NLS invitation is displayed:** treat as a **different** invite. Do not merge, do not copy the uuid onto the NLS row, do not `POST /answer/{uuid}` or `/leave/{uuid}` for that URL. One-overlay UI (same as today’s different-URL path: if `previous.action.url != action.url` then `decline()` the previous) **replaces** the NLS overlay with the uuid invite; the NLS invite terminates as its **own** missed/declined identity.
 
 ### Process vs Activity
 
@@ -239,7 +252,9 @@ Local ringing expiry: **30s** (BB `CreateIncomingFaceTimeNotification.setTimeout
 | Activity recreation | `onNewIntent` / new Activity rebinds to the same store; no second overlay for the same key |
 | Process death | Store gone. **Fail-safe:** ringing invite is lost. Socket.IO will not replay it |
 | Stale invite | 30s local expiry → `Expired` / missed Recents; optional leave if uuid still known |
-| Push/socket/NLS overlap | One overlay; NLS URL-only **upgrades** to uuid if a later socket event supplies it |
+| Same-uuid duplicates (socket retry / FCM that carries that uuid) | One overlay; ignore extras. NLS URL-only is **not** a uuid duplicate |
+| NLS URL-only vs later socket uuid | **Separate identities** unless a documented matcher uses a shared identifier **both** events actually carry. **No** time/proximity/caller-window upgrade |
+| Unrelated uuid while NLS overlay showing | Do not merge. Replace overlay with the uuid invite; NLS ends as its own missed/declined identity (no answer/leave with the new uuid for that URL) |
 
 ### Reconnect is not replay
 
@@ -389,7 +404,7 @@ Each **implementation** milestone (not this docs PR) should leave `:app:test` + 
 | 2 Lifecycle contract | 1 | Store + generations + cancellation API specified **and** (in impl) unit-tested without OkHttp | JVM state-machine tests | **Gate:** no socket/OkHttp merge without this |
 | 3 Capability gate | 1 | No create/answer HTTP when helper/private_api false | Fixture tests | Do not wait 25s |
 | 4 Socket | 2, 3 | Process-wide; config bump reconnects; **reconnect ≠ replay** | Manual connect/401; unit wrapper | Activity `onDestroy` must not disconnect |
-| 5 Ingress | 4 | uuid overlay; dedup; legacy/NLS fail-safes | Parser tests; one-overlay manual | Two events / two transports |
+| 5 Ingress | 4 | same-uuid collapse; NLS URL-only stays a **separate** identity; no time/proximity upgrade | Parser tests; two-identity case | Unrelated uuid while NLS showing |
 | 6 Answer | 2, 5 | Generations match or drop; cancel on hangup | MockWebServer + cancel tests | `admitAndLeave` race remains |
 | 7 Leave/status | 6 | Wrong uuid ignored; pending hangup defined | Status enum tests | Best-effort leave |
 | 8 Availability | 3 | Advisory only; create still works | Mock true/false/500 | Helper-down 5xx |
@@ -477,7 +492,7 @@ Full criteria in [`todo.md`](todo.md).
 | Markdown anchors in new `tasks/` files | To be checked statically after write |
 | Mermaid in this file | Static parse only (planned) |
 | Authenticated GitHub README blob / Mermaid | **UNVERIFIED** |
-| GitHub Desktop CLI topics | **Not set; unverified** |
+| GitHub repo description / topics | **Set.** Live API 2026-11-08: `private: true`, `homepage: null`, description and lowercase topics as in root README Verification. **Desktop CLI registration still unverified.** This agent did not change repo settings |
 | Accessibility / runtime / Apple certification | **None** |
 | Upstream pins, router, events, FGS docs, DataStore maven, Socket.IO delivery, Apple 109364, FCM force-quit | Fetched **2026-11-08** |
 
