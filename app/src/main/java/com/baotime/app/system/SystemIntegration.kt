@@ -1,5 +1,6 @@
 package com.baotime.app.system
 
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.verify.domain.DomainVerificationManager
@@ -71,6 +72,15 @@ object SystemIntegration {
         }
         context.startActivity(intent)
         return OpenSettingsResult.Opened
+    }
+
+    /** Whether Android allows BaoTime to raise full-screen incoming call notifications (API 34+ gate). */
+    fun canUseFullScreenIncomingAlerts(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            return true
+        }
+        return context.getSystemService(NotificationManager::class.java)
+            ?.canUseFullScreenIntent() == true
     }
 
     private fun packageUri(context: Context): Uri =

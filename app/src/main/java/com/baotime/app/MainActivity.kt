@@ -16,6 +16,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.baotime.app.call.CallLifecycle
+import com.baotime.app.call.CallLifecycleState
 import com.baotime.app.call.CallSessionController
 import com.baotime.app.call.IncomingCallController
 import com.baotime.app.call.IncomingCallListenerService
@@ -86,11 +87,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private val errorHandler = CoroutineExceptionHandler { _, failure ->
-        Log.e("BaoTime", "Unexpected app failure: ${failure.javaClass.simpleName}")
+        Log.e(LOG_TAG, "Unexpected app failure: ${failure.javaClass.simpleName}")
         reportFailure()
     }
 
     private var notificationPermissionRequested = false
+    private var resumedOnce = false
+    private var showingOverLockscreen = false
     private val notificationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         sheets.refreshSetupStatus()
     }
@@ -112,12 +115,20 @@ class MainActivity : ComponentActivity() {
         setContentView(chrome.rootFrame)
         chrome.headerTitle.setText(R.string.tab_recents)
         RootUi.styleTabs(theme, chrome.tabButtons, currentTab.get())
-        incomingCalls.bindProcessEvents(this, baoTimeApp, { sheets.dismiss() }, ::refreshCurrentTab) {
+        incomingCalls.bindProcessEvents(
+            activity = this,
+            app = baoTimeApp,
+            onDismissSheets = { sheets.dismiss() },
+            onHistoryUpdated = ::refreshCurrentTab,
+            onLifecycleStateChanged = ::syncLockscreenPresentation
+        ) {
             Toast.makeText(this@MainActivity, R.string.call_create_failed, Toast.LENGTH_LONG).show()
             refreshServerBanner()
         }
         handleIncomingIntent(intent)
+        syncLockscreenPresentation()
         baoTimeApp.socket.ensureConnected()
+        baoTimeApp.syncPushRegistration()
         launchSafely { refreshServerBanner() }
         refreshCurrentTab()
         IncomingCallListenerService.ensureChannel(this)
@@ -137,6 +148,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleIncomingIntent(intent)
+        syncLockscreenPresentation()
     }
 
     override fun onStop() {
@@ -150,6 +162,13 @@ class MainActivity : ComponentActivity() {
         // in system settings (domain handler, notification access).
         sheets.refreshSetupStatus()
         incomingCalls.syncState(callLifecycle.state.value)
+        syncLockscreenPresentation()
+        if (resumedOnce) {
+            baoTimeApp.socket.ensureConnected()
+            launchSafely { refreshServerBanner() }
+        } else {
+            resumedOnce = true
+        }
         if (currentTab.get() == TAB_CONTACTS) refreshCurrentTab()
         if (Build.VERSION.SDK_INT >= 33 && !notificationPermissionRequested &&
             IncomingCallListenerService.hasNotificationAccess(this) &&
@@ -158,6 +177,14 @@ class MainActivity : ComponentActivity() {
             notificationPermissionRequested = true
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+    }
+
+    private fun syncLockscreenPresentation(state: CallLifecycleState = callLifecycle.state.value) {
+        val activeCall = state !is CallLifecycleState.Idle && state !is CallLifecycleState.Terminal
+        if (showingOverLockscreen == activeCall) return
+        showingOverLockscreen = activeCall
+        setShowWhenLocked(activeCall)
+        setTurnScreenOn(activeCall)
     }
 
     private fun dismissTopSurface(): Boolean {
@@ -340,7 +367,7 @@ class MainActivity : ComponentActivity() {
             chrome.clearHistoryAction.isEnabled = records.isNotEmpty()
             val missed = records.count { it.callType == BaoCallRecord.TYPE_MISSED }
             chrome.tabButtons[TAB_RECENTS].text = if (missed > 0) {
-                getString(R.string.tab_recents) + " ($missed)"
+                getString(R.string.tab_recents_badge_fmt, getString(R.string.tab_recents), missed)
             } else {
                 getString(R.string.tab_recents)
             }
@@ -363,6 +390,7 @@ class MainActivity : ComponentActivity() {
     private suspend fun onServerConfigSaved(): BlueBubblesServerStatus {
         contactCache.invalidate()
         baoTimeApp.socket.onConfigChanged(appConfig.connectionRevision())
+        baoTimeApp.syncPushRegistration()
         refreshCurrentTab()
         return refreshServerBanner()
     }
@@ -383,6 +411,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private companion object {
+        const val LOG_TAG = "BaoTime"
         const val TAB_RECENTS = 0
         const val TAB_CONTACTS = 1
         const val RECENTS_LIMIT = 40

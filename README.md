@@ -2,10 +2,14 @@
 
 [![Version 1.1.0](https://img.shields.io/badge/version-1.1.0-087535)](#build)
 [![minSdk 29](https://img.shields.io/badge/minSdk-29-3DDC84?logo=android&logoColor=white)](#requirements)
-[![targetSdk 37](https://img.shields.io/badge/targetSdk-37-3DDC84?logo=android&logoColor=white)](#requirements)
+[![targetSdk / compileSdk 37](https://img.shields.io/badge/targetSdk%20%2F%20compileSdk-37-3DDC84?logo=android&logoColor=white)](#requirements)
 [![AGP 9.6.0-alpha03](https://img.shields.io/badge/AGP-9.6.0--alpha03-3DDC84)](#build)
 [![Gradle 9.9.0](https://img.shields.io/badge/Gradle-9.9.0-02303A?logo=gradle&logoColor=white)](#build)
-[![Kotlin source](https://img.shields.io/badge/source-Kotlin-7F52FF?logo=kotlin&logoColor=white)](#repository-layout)
+[![Daemon JDK 25](https://img.shields.io/badge/Daemon%20JDK-25-ED8B00?logo=openjdk&logoColor=white)](#build)
+[![Kotlin AGP built-in](https://img.shields.io/badge/Kotlin-AGP%20built--in-7F52FF?logo=kotlin&logoColor=white)](#repository-layout)
+[![OkHttp 5.5.1](https://img.shields.io/badge/OkHttp-5.5.1-009688)](#architecture)
+[![Socket.IO v4 (2.1.2)](https://img.shields.io/badge/Socket.IO%20v4-2.1.2-010101?logo=socketdotio&logoColor=white)](#architecture)
+[![UnifiedPush v2.1](https://img.shields.io/badge/UnifiedPush-v2.1-4E5EE4)](#incoming-invitations)
 [![Private repository](https://img.shields.io/badge/visibility-private-6e7681)](#limitations)
 
 <p align="center">
@@ -14,14 +18,17 @@
 
 ## ELI5
 
-BaoTime is an Android phone app that talks to **your** Mac.
+Explain it like I'm 5:
 
-Apple FaceTime still happens on Apple's website. The Mac runs a [BlueBubbles](https://bluebubbles.app/) server. BaoTime asks that server for a FaceTime **web link**, then opens that link in a locked-down in-app browser so you can join the room. Incoming FaceTime links that appear in BlueBubbles or Beeper notifications can raise a full-screen Accept / Decline screen instead of leaving you in a browser tab.
-
-It is **not** Apple FaceTime, **not** an iMessage client, and **not** a replacement for the system Phone app. Cellular dialing is handed to the stock dialer.
+- **Android phones do not have Apple's FaceTime app built in** — only Apple devices can start or answer real FaceTime calls directly with Apple.
+- **Your Mac stays at home and does the Apple part.** It runs a free helper server called [BlueBubbles](https://bluebubbles.app/) that knows how to create and answer FaceTime web links on your Mac.
+- **Starting a call:** You pick a contact (or type a phone number or email) in BaoTime. BaoTime asks your Mac *"make me a FaceTime room link,"* opens that link inside a locked-down mini browser right inside BaoTime, and lets you share the link and talk on video.
+- **Answering a call:** When someone FaceTimes your Mac, your Mac rings BaoTime on your Android phone (over a live connection, UnifiedPush, or a companion notification). Your phone wakes up and shows a native **Accept / Decline** call screen instead of making you dig through chat messages for a web link.
+- **What BaoTime is NOT:** It is **not** made by Apple, it is **not** an iMessage chat app, and it does **not** replace your regular cellular Phone app (normal phone calls are handed to your phone's built-in dialer).
 
 ## Contents
 
+- [ELI5](#eli5)
 - [What it is](#what-it-is)
 - [Documentation index](#documentation-index)
 - [Features](#features)
@@ -98,9 +105,9 @@ Grounded in `app/src/main` (manifest, strings, and Kotlin). Things the app does 
 
 ### Incoming invitations
 
-- **Live Socket.IO 4 (`BlueBubblesSocket`, process-wide in `BaoTimeApp`):** subscribes to `ft-call-status-changed` (`status_id == 4` incoming with `uuid`, `status_id == 6` disconnected) and legacy `incoming-facetime` while the app process is alive. Accepting a `uuid`-backed call invokes `POST /api/v1/facetime/answer/:call_uuid` (cancellable if declined, hung up, or invalidated by a Settings save) and opens the returned room link in the gated WebView. Declining or timing out (30s) invokes best-effort `POST /api/v1/facetime/leave/:call_uuid` and records an unanswered Recents row.
-- **Clean-room UnifiedPush / push ingress (`IncomingPushReceiver` + `FaceTimePushHandler`):** handles `org.unifiedpush.android.connector.NEW_ENDPOINT` (registering via `POST /api/v1/fcm/device`) and `org.unifiedpush.android.connector.MESSAGE` (`ft-call-status-changed` and `incoming-facetime` payloads), routing `uuid`-backed calls into the same `CallLifecycle` (`InviteSource.Fcm`) and `POST /api/v1/facetime/answer/:call_uuid` path and posting `NotificationCompat.CATEGORY_CALL` alerts. When the user force-stops BaoTime in Android Settings (`stopped=true`), Android blocks broadcasts until the user manually reopens BaoTime once.
-- **Notification Listener fallback (`IncomingCallListenerService`):** watches **BlueBubbles** (`com.bluebubbles.messaging`) and **Beeper** (`com.beeper.android`) only. If notification text contains a FaceTime URL, BaoTime posts a high-importance call notification with a full-screen intent. NLS URL-only invitations and socket/push UUID invitations are tracked as separate identities in `CallLifecycle`. Duplicate notification keys (up to 64) and duplicate UUIDs are ignored.
+- **Live Socket.IO 4 (`BlueBubblesSocket`, process-wide in `BaoTimeApp`):** subscribes to `ft-call-status-changed` (`status_id == 4` incoming with `uuid`, `status_id == 6` disconnected) and legacy `incoming-facetime` while the app process is alive, automatically recovering `Offline` sockets when `MainActivity` resumes. When foregrounded, `MainActivity` presents the native `IncomingCallUi` directly; when backgrounded with no `STARTED` Activity, `BaoTimeApp` posts a `NotificationCompat.CATEGORY_CALL` alert (`IncomingCallNotifications`) with a 30s timeout and lockscreen wake (`setShowWhenLocked` / `setTurnScreenOn`). Accepting a `uuid`-backed call invokes `POST /api/v1/facetime/answer/:call_uuid` (cancellable if declined, hung up, or invalidated by a Settings save) and opens the returned room link in the gated WebView. Declining or timing out (30s) invokes best-effort `POST /api/v1/facetime/leave/:call_uuid`, cancels active call notifications, and records an unanswered Recents row.
+- **Clean-room UnifiedPush / push ingress (`UnifiedPushRegistrar` + `IncomingPushReceiver` + `FaceTimePushHandler`):** actively discovers an installed UnifiedPush distributor (`org.unifiedpush.android.distributor.REGISTER` with `PendingIntent` creator verification), persists the connector token and delivered endpoint in `baotime_push` (re-registering automatically when BlueBubbles credentials are saved), handles `org.unifiedpush.android.connector.NEW_ENDPOINT` under `goAsync()` (`POST /api/v1/fcm/device`), clears stale endpoints on `UNREGISTERED`, and routes `org.unifiedpush.android.connector.MESSAGE` (`ft-call-status-changed` and `incoming-facetime` payloads) into the same `CallLifecycle` (`InviteSource.Fcm`) and `POST /api/v1/facetime/answer/:call_uuid` path. When the user force-stops BaoTime in Android Settings (`stopped=true`), Android blocks broadcasts until the user manually reopens BaoTime once.
+- **Notification Listener fallback (`IncomingCallListenerService`):** watches **BlueBubbles** (`com.bluebubbles.messaging`) and **Beeper** (`com.beeper.android`) only. If notification text contains a FaceTime URL, BaoTime posts a high-importance call notification (`R.drawable.ic_video_call` monochrome status icon, 30s timeout, API 34+ `NotificationManager.canUseFullScreenIntent()` gate). NLS URL-only invitations and socket/push UUID invitations are tracked as separate identities in `CallLifecycle`. Duplicate notification keys (up to 64) and duplicate UUIDs are ignored.
 
 ### Settings
 
@@ -122,54 +129,111 @@ Grounded in `app/src/main` (manifest, strings, and Kotlin). Things the app does 
 
 ## Architecture
 
+### System overview
+
 ```mermaid
 flowchart TB
-  subgraph androidDevice ["Android device"]
+  subgraph androidDevice ["Android device (com.baotime.app)"]
+    app["BaoTimeApp (process scope)"]
+    sock["BlueBubblesSocket (Socket.IO v4)"]
+    life["CallLifecycle (state machine)"]
+    reg["UnifiedPushRegistrar (baotime_push)"]
+    push["IncomingPushReceiver + FaceTimePushHandler"]
     nls["IncomingCallListenerService"]
-    ui["MainActivity Views"]
-    cfg["AppConfig plus Keystore"]
+    notif["IncomingCallNotifications"]
+    ui["MainActivity Views + Controllers"]
+    cfg["AppConfig + Keystore AES/GCM"]
     hist["CallHistory SharedPreferences"]
     contacts["ContactsCache"]
-    client["BlueBubblesClient"]
-    room["FaceTime WebView"]
-    nls -->|"full-screen intent"| ui
+    client["BlueBubblesClient (OkHttp 5.5.1)"]
+    room["FaceTime WebView (URL + media gate)"]
+
+    app --> sock
+    app --> life
+    app --> reg
+    sock -->|"ft-call-status-changed / incoming-facetime"| life
+    push -->|"MESSAGE / UNREGISTERED"| life
+    push -->|"NEW_ENDPOINT"| reg
+    life -->|"background Ringing / cancel"| notif
+    nls -->|"FaceTime URL from notification"| notif
+    notif -->|"CATEGORY_CALL + fullScreenIntent"| ui
+    life -->|"StateFlow CallLifecycleState"| ui
+    ui -->|"accept / decline / room lifecycle"| life
+    life -->|"answer / leave HTTP"| client
+    reg -->|"POST /api/v1/fcm/device"| client
     ui --> cfg
     ui --> hist
     ui --> contacts
     ui --> client
     ui --> room
+    contacts -->|"GET /api/v1/contact"| client
   end
 
   subgraph macHost ["Your Mac"]
-    bbs["BlueBubbles server"]
-    helper["FaceTime helper / Private API"]
+    bbs["BlueBubbles server v1.9.12"]
+    helper["FaceTime helper + Private API"]
     bbs --> helper
   end
 
-  subgraph others ["Other apps and Apple"]
+  subgraph externalPeers ["Distributors, companion apps, and Apple"]
+    upDist["UnifiedPush distributor"]
     bbApp["BlueBubbles or Beeper app"]
     apple["facetime.apple.com"]
   end
 
-  bbApp -->|"FaceTime URL in a notification"| nls
+  reg -->|"REGISTER broadcast"| upDist
+  upDist -->|"NEW_ENDPOINT / MESSAGE"| push
+  bbApp -->|"notification text"| nls
+  sock -->|"WebSocket or polling"| bbs
+  bbs -->|"live call events"| sock
   client -->|"HTTPS or HTTP LAN"| bbs
   helper --> apple
-  room -->|"trusted FaceTime URL only"| apple
-  contacts -->|"GET /api/v1/contact"| client
+  room -->|"canonical HTTPS room only"| apple
+```
+
+### Authoritative `CallLifecycle` state machine
+
+`CallLifecycle` (`BaoTimeApp`) owns a single process-wide state store keyed by `callUuid`, `configGeneration` (`AppConfig.connectionRevision`), and `inviteGeneration`. Same-UUID events from Socket.IO and UnifiedPush collapse to one invite; URL-only Notification Listener invites (`InviteSource.NlsUrl`) stay strictly separate and never call `/facetime/answer` or `/facetime/leave`.
+
+```mermaid
+stateDiagram-v2
+  [*] --> Idle
+
+  Idle --> Ringing: onIncomingUuid / onIncomingNlsUrl / onIncomingLegacy
+  Idle --> InRoom: outgoing or direct URL onRoomOpened
+
+  Ringing --> Answering: accept() with callUuid
+  Ringing --> JoiningUrl: accept() with NLS faceTimeUrl
+  Ringing --> Declining: decline() with callUuid
+  Ringing --> Terminal: decline() (URL-only) / status_id 6 / 30s expiry / config change
+  Ringing --> Ringing: displaced by newer non-duplicate invite
+
+  Declining --> Terminal: best-effort leaveCall + Declined
+
+  Answering --> Connecting: POST /facetime/answer returns valid room URL
+  Answering --> Declining: decline() while HTTP answer in flight
+  Answering --> Terminal: status_id 6 / HTTP failure / config change
+
+  JoiningUrl --> InRoom: onRoomOpened
+  Connecting --> InRoom: onRoomOpened
+
+  InRoom --> Idle: onRoomClosed (outgoing or direct link)
+  InRoom --> Terminal: onRoomClosed (Completed for invited call)
 ```
 
 Package map (all under `com.baotime.app`):
 
 | Package | Role |
 | --- | --- |
-| `config` | SharedPreferences connection + favorites; Keystore password; appearance gates |
-| `network` | HTTP client; URL shape policy (no DNS / no "is this LAN?" checks) |
-| `routing` | Intent → action; FaceTime URL classification; BlueBubbles paths |
-| `data` | History codec; device contacts provider; Mac + device cache |
-| `call` | Room session, incoming overlay, notification listener |
+| `(root)` | `BaoTimeApp` process-scoped signaling/push owner + `MainActivity` single-task UI scaffold & lockscreen call presentation |
+| `config` | SharedPreferences connection + favorites; Keystore AES/GCM password; appearance gates |
+| `network` | OkHttp 5 transport, `BlueBubblesClient`, `BlueBubblesSocket` (Socket.IO v4), `ServerCapability`, `FaceTimePushHandler`, `LogRedactor`, URL shape policy |
+| `routing` | Intent → action; FaceTime URL classification; canonical BlueBubbles API routes |
+| `data` | History codec; device contacts provider; Mac + device contacts cache |
+| `call` | `CallLifecycle` state machine, `UnifiedPushRegistrar`, `IncomingPushReceiver`, `IncomingCallListenerService`, `IncomingCallNotifications`, room & incoming controllers |
 | `audio` | Speaker as a communication device (API 31+). Does not set mode or mute |
-| `system` | Domain verification + settings jumps |
-| `ui` / `ui.theme` / `ui.components` | View chrome, glass blur, sheets, room overlay |
+| `system` | Domain verification, API 34+ full-screen intent gate, and system settings jumps |
+| `ui` / `ui.theme` / `ui.components` | View chrome, glass blur, modal sheets, incoming overlay, gated WebView room |
 
 BlueBubbles paths the client actually calls:
 
@@ -193,71 +257,146 @@ The password is sent as a `password` **query parameter** on HTTP URLs and `guid`
 ```mermaid
 sequenceDiagram
   actor User
-  participant App as BaoTime
-  participant BB as BlueBubbles
+  participant App as MainActivity
+  participant BB as BlueBubbles v1.9.12
   participant Web as FaceTime WebView
   participant Apple as facetime.apple.com
 
-  User->>App: New Call or contact FaceTime action
+  User->>App: New Call handle or contact FaceTime action
   App->>App: debounce one in-flight create
+  opt Callee handle typed (non-URL)
+    App->>BB: GET /api/v1/handle/availability/facetime?address=...
+    BB-->>App: advisory available true / false / error (never blocks create)
+  end
   App->>BB: POST /api/v1/facetime/session
-  alt created HTTPS FaceTime URL
+  alt Created canonical HTTPS FaceTime URL
     BB-->>App: data.link
-    App->>App: record outgoing history
-    App->>Web: loadRoom
-    Web->>Apple: open room
-    Apple-->>Web: camera or mic permission request
-    Web-->>User: Continue, then Android CAMERA / RECORD_AUDIO if missing
-  else missing URL, rejected URL, HTTP error, empty or non-room link
+    App->>App: record outgoing history + CallLifecycle.onRoomOpened
+    App->>Web: loadRoom(data.link)
+    Web->>Apple: open HTTPS room (JS enabled for room)
+    Apple-->>Web: WebRTC camera or mic permission request
+    Web-->>User: Show Continue prompt before granting media
+    User->>Web: Tap Continue (requests Android CAMERA / RECORD_AUDIO if needed)
+  else Missing config, helper off, HTTP error, or non-room link
     BB-->>App: typed ServerFailure
-    App-->>User: toast Could not create a FaceTime link
+    App-->>User: Toast Could not create a FaceTime link
   end
 ```
 
-### Incoming BlueBubbles or Beeper notification
+### Incoming BlueBubbles Socket.IO or UnifiedPush call (UUID)
 
 ```mermaid
 sequenceDiagram
-  participant BBApp as BlueBubbles or Beeper
+  actor User
+  participant BB as BlueBubbles v1.9.12
+  participant Ingress as BlueBubblesSocket or IncomingPushReceiver
+  participant Life as CallLifecycle
+  participant UI as MainActivity / IncomingCallNotifications
+  participant Web as FaceTime WebView
+
+  BB->>Ingress: ft-call-status-changed (status_id 4, uuid, caller)
+  Ingress->>Life: onIncomingUuid(uuid, caller, configGeneration)
+  Life->>UI: Ringing (in-app overlay or background CATEGORY_CALL alert)
+  alt User taps Accept within 30s
+    User->>Life: accept()
+    Life->>BB: POST /api/v1/facetime/answer/:call_uuid
+    alt Valid HTTPS FaceTime room URL returned
+      BB-->>Life: data.link
+      Life->>UI: Connecting(url)
+      UI->>Web: record incoming + loadRoom(url)
+    else Remote hangup, config change, or server failure
+      BB-->>Life: cancelled or ServerFailure
+      Life->>BB: best-effort POST /api/v1/facetime/leave/:call_uuid (if late link)
+      Life->>UI: Terminal + cancel call notification
+    end
+  else User taps Decline, remote status_id 6, or 30s expiry
+    Life->>BB: best-effort POST /api/v1/facetime/leave/:call_uuid
+    Life->>UI: record unanswered + cancel call notification
+  end
+```
+
+### Incoming BlueBubbles or Beeper notification fallback (URL-only)
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant BBApp as BlueBubbles or Beeper app
   participant NLS as IncomingCallListenerService
+  participant Notif as IncomingCallNotifications
   participant App as MainActivity
+  participant Life as CallLifecycle
   participant Hist as CallHistory
 
-  BBApp->>NLS: notification from those two packages only
-  NLS->>NLS: extract https://facetime.apple.com URL
-  alt unseen notification key
-    NLS->>App: full-screen VIEW intent plus incoming extra
-    App-->>User: Accept or Decline
-    alt Accept
-      User->>App: Accept
-      App->>App: record incoming, open room
-    else Decline
-      User->>App: Decline
-      App->>Hist: record unanswered
+  BBApp->>NLS: StatusBarNotification (com.bluebubbles.messaging or com.beeper.android)
+  NLS->>NLS: extract canonical https://facetime.apple.com URL
+  alt Unseen notification key (LRU 64)
+    NLS->>Notif: notifyIncomingCall (30s timeout, API 34+ FSI gate)
+    Notif->>App: VIEW intent + incoming extra
+    App->>Life: onIncomingNlsUrl(url, caller, configGeneration)
+    Life-->>User: Ringing (Accept or Decline)
+    alt User taps Accept
+      User->>Life: accept() -> JoiningUrl(url)
+      App->>Hist: record incoming
+      App->>App: loadRoom(url) (no /facetime/answer REST call)
+    else User taps Decline or 30s expiry
+      Life->>Hist: record unanswered (no /facetime/leave REST call)
     end
-  else duplicate key
+  else Duplicate notification key
     NLS->>NLS: ignore
   end
 ```
 
-### Room URL gate
+### UnifiedPush discovery & endpoint registration
+
+```mermaid
+sequenceDiagram
+  participant App as BaoTimeApp / MainActivity
+  participant Reg as UnifiedPushRegistrar
+  participant Dist as UnifiedPush distributor
+  participant Rx as IncomingPushReceiver
+  participant BB as BlueBubbles v1.9.12
+
+  App->>Reg: syncRegistration() (launch or Settings save)
+  alt Cached endpoint already stored for distributor
+    Reg->>BB: POST /api/v1/fcm/device (re-sync endpoint with current server)
+  end
+  Reg->>Dist: broadcast org.unifiedpush.android.distributor.REGISTER (PendingIntent creator verified)
+  Dist->>Rx: org.unifiedpush.android.connector.NEW_ENDPOINT (token, endpoint)
+  Rx->>Rx: goAsync() + verify token matches baotime_push
+  Rx->>Reg: onNewEndpoint(endpoint)
+  Rx->>BB: POST /api/v1/fcm/device
+  opt Distributor sends UNREGISTERED
+    Dist->>Rx: org.unifiedpush.android.connector.UNREGISTERED (token)
+    Rx->>Reg: clearCachedEndpoint()
+  end
+```
+
+### Room URL & media gate
 
 ```mermaid
 flowchart TD
-  start["loadRoom or main-frame navigation"]
+  start["loadRoom(url) or main-frame navigation"]
   check{"HTTPS, host facetime.apple.com, no userinfo, port default or 443?"}
-  jsOn["Enable JavaScript, load"]
-  jsOff["Keep JavaScript off, stop, show Only secure FaceTime rooms can open here"]
-  sub{"Subframe HTTPS on apple.com or icloud.com?"}
-  allow["Allow"]
-  block["Block"]
+  jsOn["Enable JavaScript and load room"]
+  jsOff["Keep JavaScript off, stop load, show secure-room warning"]
+  sub{"Subframe navigation: HTTPS on apple.com or icloud.com?"}
+  allowSub["Allow subframe"]
+  blockSub["Block subframe"]
+  mediaReq{"WebRTC camera / mic request from Apple media host?"}
+  contPrompt["Show native Continue bar before granting media"]
+  sysPerm["Verify Android CAMERA / RECORD_AUDIO, then grant to WebView"]
+  denyMedia["Deny WebView permission request"]
 
   start --> check
-  check -->|yes| jsOn
-  check -->|no| jsOff
+  check -->|"yes"| jsOn
+  check -->|"no"| jsOff
   jsOn --> sub
-  sub -->|yes| allow
-  sub -->|no| block
+  sub -->|"yes"| allowSub
+  sub -->|"no"| blockSub
+  jsOn --> mediaReq
+  mediaReq -->|"yes"| contPrompt
+  mediaReq -->|"no"| denyMedia
+  contPrompt --> sysPerm
 ```
 
 ## Requirements
@@ -275,13 +414,12 @@ flowchart TD
 
 | Piece | What the tree pins |
 | --- | --- |
-| Gradle | Wrapper **9.9.0** (`gradle/wrapper/gradle-wrapper.properties`) |
-| Android Gradle Plugin | **9.6.0-alpha03** (preview) via `gradle/libs.versions.toml` |
-| Kotlin | Sources are `.kt`. Catalog key `kotlin = "2.4.21"` is **not referenced** by any plugin or library. `app/build.gradle.kts` applies only `com.android.application` (AGP 9 built-in Kotlin). |
+| Gradle | Wrapper **9.9.0** ([`gradle/wrapper/gradle-wrapper.properties`](gradle/wrapper/gradle-wrapper.properties)) |
+| Android Gradle Plugin | **9.6.0-alpha03** (preview) via [`gradle/libs.versions.toml`](gradle/libs.versions.toml) |
+| Kotlin | Sources are `.kt`; `app/build.gradle.kts` applies `com.android.application` with AGP 9 built-in Kotlin support (no separate Kotlin Gradle plugin pin). |
 | Java bytecode | Source / target **17** |
-| Gradle daemon JVM | `gradle/gradle-daemon-jvm.properties` toolchain **25** |
-| Android SDK | Platform **37**, plus a `local.properties` `sdk.dir` (gitignored) |
-| `org.gradle.java.home` | [`gradle.properties`](gradle.properties) currently points at a **macOS Android Studio Preview JBR**. That path will not exist on Linux/CI. Override or comment it out on other machines. |
+| Gradle daemon JVM | Toolchain **25** via [`gradle/gradle-daemon-jvm.properties`](gradle/gradle-daemon-jvm.properties) (Foojay Disco auto-provisioning for macOS, Linux, Windows, and FreeBSD; no machine-specific JDK path in [`gradle.properties`](gradle.properties)) |
+| Android SDK | Platform **37**, plus a gitignored `local.properties` `sdk.dir` (or `ANDROID_HOME`) |
 
 ### Optional tooling
 
@@ -317,7 +455,7 @@ Other tasks this module defines:
 
 Release `isMinifyEnabled` is **false**. There is no `signingConfigs` block. `allowBackup` is false; [data extraction rules](app/src/main/res/xml/data_extraction_rules.xml) exclude root/file/database/sharedpref/external for cloud backup and device transfer.
 
-If Gradle refuses to start, check `org.gradle.java.home` in `gradle.properties` before blaming the wrapper.
+Gradle resolves its daemon JDK **25** automatically through [`gradle/gradle-daemon-jvm.properties`](gradle/gradle-daemon-jvm.properties) once any local bootstrap `java` is on `PATH` (or `JAVA_HOME` is set).
 
 ## Tests
 
@@ -335,10 +473,12 @@ JUnit 4, MockWebServer, plus `org.json` on the JVM:
 | [`CallLifecycleTest`](app/src/test/java/com/baotime/app/call/CallLifecycleTest.kt) | Authoritative call state machine: `configGeneration` & `inviteGeneration`, late HTTP drop, hangup/decline while answering, wrong-uuid disconnect ignored, NLS URL vs socket UUID separation, 30s ringing expiry |
 | [`ServerCapabilityTest`](app/src/test/java/com/baotime/app/network/ServerCapabilityTest.kt) | Pinned 1.9.12 + `private_api` + `helper_connected` fail-closed capability gate with Task 1 fixtures |
 | [`BlueBubblesSocketTest`](app/src/test/java/com/baotime/app/network/BlueBubblesSocketTest.kt) | Process-wide Socket.IO generation lifecycle and `401 AuthFailed` vs `Offline` distinction |
+| [`BlueBubblesSocketRecoveryTest`](app/src/test/java/com/baotime/app/network/BlueBubblesSocketRecoveryTest.kt) | `Offline` → `Connected` recovery on `ensureConnected()` and in-flight handshake deduplication |
 | [`IncomingFaceTimePayloadTest`](app/src/test/java/com/baotime/app/network/IncomingFaceTimePayloadTest.kt) | `ft-call-status-changed` (`status_id` 4 and 6) and legacy `incoming-facetime` payload parsing |
 | [`FaceTimeAnswerTest`](app/src/test/java/com/baotime/app/network/FaceTimeAnswerTest.kt) | `POST /api/v1/facetime/answer/:call_uuid`, `POST /api/v1/facetime/leave/:call_uuid`, and coroutine cancellation during slow answer |
 | [`FaceTimeAvailabilityTest`](app/src/test/java/com/baotime/app/network/FaceTimeAvailabilityTest.kt) | Non-blocking `GET /api/v1/handle/availability/facetime` advisory (`true`, `false`, `500`) never blocking `createFaceTimeSession` |
 | [`FaceTimePushHandlerTest`](app/src/test/java/com/baotime/app/network/FaceTimePushHandlerTest.kt) | UnifiedPush / push envelope parsing (`ft-call-status-changed` and `incoming-facetime`), same-UUID collapse + Task 6 `answerCall` routing, and `POST /api/v1/fcm/device` registration |
+| [`UnifiedPushRegistrarTest`](app/src/test/java/com/baotime/app/call/UnifiedPushRegistrarTest.kt) | UnifiedPush distributor selection, instance-token validation, endpoint persistence/unregistration, and server re-registration on config update |
 | [`BlueBubblesClientTest`](app/src/test/java/com/baotime/app/network/BlueBubblesClientTest.kt) | `LogRedactor` secret scrubbing, `pingServer`, `fetchContacts`, `createFaceTimeSession`, and OkHttp call cancellation |
 
 ### Instrumented tests (`app/src/androidTest`)
@@ -408,10 +548,10 @@ UI is DayNight (`Theme.DeviceDefault.DayNight`), tokens in `values/` + `values-n
 
 - Server password: Android Keystore AES/GCM, `v1:` + Base64. Reads never create keys. Missing vs corrupt vs wrong version stay distinct (`PasswordRead`).
 - Connection URL, ciphertext, and a monotonically increasing revision are written in one edit. `ContactsCache` drops in-flight Mac results if the revision moved.
-- History JSON in `baotime_call_history`. Favorites in `baotime_config`.
+- History JSON in `baotime_call_history`. Favorites in `baotime_config`. UnifiedPush connector token, distributor package, and endpoint in `baotime_push`.
 - Backup / device transfer of app data is excluded.
 - WebView: no file/content access, mixed content never, JS only on a trusted FaceTime room URL, media permission only for Apple media hosts and only camera/mic resources.
-- Manifest `queries` BlueBubbles and Beeper so the listener can see those packages.
+- Manifest `queries` BlueBubbles, Beeper, `https` `VIEW`, and `org.unifiedpush.android.distributor.REGISTER` so notification listener and UnifiedPush distributor discovery respect Android 11+ package visibility.
 - `BLUETOOTH_CONNECT` and `MODIFY_AUDIO_SETTINGS` are **declared** and have **no Kotlin usages**. Speaker routing uses `AudioManager.setCommunicationDevice` on API 31+.
 
 ## Limitations
@@ -421,10 +561,8 @@ UI is DayNight (`Theme.DeviceDefault.DayNight`), tokens in `values/` + `values-n
 - **No in-tree iOS app.** `assets/` holds Icon Composer / iOS PNG exports used to project the Android launcher.
 - **Third-party notices, no CI, no releases:** Third-party dependency notices are recorded in [`NOTICE`](NOTICE); there is no CI workflow or published release in this repository.
 - **Private repo.** Shields that would need GitHub API access (stars, workflow status, detected license) are omitted on purpose.
-- Catalog `kotlin = "2.4.21"` is unused; do not treat it as a verified compiler version.
 - AGP **9.6.0-alpha03** is an alpha. Tooling drift is expected.
-- `org.gradle.java.home` is a machine-specific macOS path.
-- Password travels as a URL query parameter. Prefer HTTPS; HTTP is allowed for LAN.
+- Password travels as a URL query parameter (`password=` on REST, `guid=` on Socket.IO handshake, redacted in diagnostics by `LogRedactor`). Prefer HTTPS; HTTP is allowed for LAN / Tailscale.
 - `autoVerify` is set for `facetime.apple.com` but this repo does not ship `assetlinks.json`. Users may have to pick the handler manually.
 - Incoming notification Listener capture only sees BlueBubbles and Beeper notification text (in addition to live `BlueBubblesSocket` and `IncomingPushReceiver`). Other apps are ignored.
 - Recents is local to the phone, not iCloud / Mac history.
@@ -443,13 +581,13 @@ What was actually checked for this README, the `tasks/` docs, and the implementa
 
 | Check | Status |
 | --- | --- |
-| Static shields (version, SDK, AGP, Gradle, Kotlin, private) | **Previewed earlier** in headless Chrome against live shields.io (unauthenticated). **Not** a CI badge. |
-| Mermaid in this README (architecture, create-link, incoming NLS, room gate) | **Parsed and rendered earlier** with mermaid 11 in headless Chrome. **Authenticated github.com blob rendering is UNVERIFIED** (private repo; needs a logged-in GitHub session). |
-| In-document markdown anchors and relative file links | Checked statically. |
+| Static shields (version, SDK, AGP, Gradle, Daemon JDK, Kotlin, OkHttp, Socket.IO, UnifiedPush, private) | **Checked statically** against pinned Gradle / manifest / protocol versions; baseline shields previewed earlier against live `shields.io` (unauthenticated). **Not** a CI badge. |
+| Mermaid in this README (system architecture, `CallLifecycle` state machine, create-link, incoming UUID, incoming NLS, UnifiedPush sync, room & media gate) | **Checked statically** (standard `flowchart`, `stateDiagram-v2`, and `sequenceDiagram` blocks; quoted labels; directional edges); baseline diagrams rendered earlier with Mermaid 11 in headless Chrome. **Authenticated `github.com` blob rendering is UNVERIFIED** (private repo; needs a logged-in GitHub session). |
+| In-document markdown anchors and relative file links | **Checked statically** (all anchor links and relative repository paths verified). |
 | Mermaid in [`tasks/plan.md`](tasks/plan.md) (`CallLifecycle`) | Static syntax check; state transitions unit-tested in [`CallLifecycleTest`](app/src/test/java/com/baotime/app/call/CallLifecycleTest.kt). |
-| App `assembleDebug` / `:app:test` / `assembleDebugAndroidTest` / `:app:lintDebug` | **Passed locally** (`./gradlew :app:test :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug` — 63 JVM unit tests, 0 failures; 0 lint errors/warnings). |
-| Instrumented AVD suite (`baotime_audit_20261107`) | **Passed locally** (35 `auditFixture=true` tests including `InvitationAndHistoryTest#unifiedPushIngressRoutesIntoCallLifecycle` + `ContactDirectoryJourneysTest` + `InstalledLauncherTest` — 36/36 passed, 0 failures). Physical-device `DeviceConnectionCheckTest` (`deploymentCheck=true`) remains gated on a connected Xiaomi device with `deployment-connection-input.json`. |
+| App `assembleDebug` / `:app:test` / `assembleDebugAndroidTest` / `:app:lintDebug` | **Passed locally** (`./gradlew :app:test :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug` — 69 JVM unit tests across 13 suites, 0 failures; 0 lint errors/warnings). |
+| Instrumented AVD suite (`baotime_audit_20261107`) | **Passed locally** (35 `auditFixture=true` + `NavigationInsetPaintTest` tests and `InstalledLauncherTest` `installationCheck=true` — 36/36 passed, 0 failures). Physical-device `DeviceConnectionCheckTest` (`deploymentCheck=true`) remains gated on a connected Xiaomi device with `deployment-connection-input.json`. |
 | Accessibility, Apple HIG, FaceTime WebView compatibility | **Not certified.** Apple officially supports Chrome/Edge on Android (`109364`), not Android WebView; Task 13 matrix recorded in [`tasks/todo.md`](tasks/todo.md). |
 | GitHub repo description / topics | **Set** (parent, via Mac `gh`; this agent did not change settings). Live API 2026-11-08: `private: true`, `homepage: null`, description `Android client that creates and joins FaceTime web links through a personal BlueBubbles Mac server`, topics `android`, `kotlin`, `facetime`, `bluebubbles`, `imessage`, `webview`, `gradle`. **Desktop CLI registration still unverified.** |
-| Design `scripts/audit_design.py` | **Passed locally** (678 checks reported, 0 errors; narrow source/icon provenance only, not runtime certification). |
+| Design `scripts/audit_design.py` | **Passed locally** (679 checks reported, 0 errors; narrow source/icon provenance only, not runtime certification). |
 

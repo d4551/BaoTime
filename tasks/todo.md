@@ -148,6 +148,8 @@ Task 2 (lifecycle) **precedes** Task 12 (OkHttp). Tasks 4/5/7 implement Task 2; 
 - `app/src/main/java/com/baotime/app/network/BlueBubblesSocket.kt`
 - `app/src/main/java/com/baotime/app/BaoTimeApp.kt` (or existing Application if added)
 - `app/src/main/java/com/baotime/app/MainActivity.kt` (observe only)
+- `app/src/test/java/com/baotime/app/network/BlueBubblesSocketTest.kt`
+- `app/src/test/java/com/baotime/app/network/BlueBubblesSocketRecoveryTest.kt`
 
 **Estimated scope:** Medium: 3-5 files
 
@@ -389,8 +391,11 @@ https://firebase.google.com/docs/cloud-messaging/flutter/receive — Android for
 
 - `app/src/main/AndroidManifest.xml`
 - `app/src/main/java/com/baotime/app/network/FaceTimePushHandler.kt`
+- `app/src/main/java/com/baotime/app/call/UnifiedPushRegistrar.kt`
 - `app/src/main/java/com/baotime/app/call/IncomingPushReceiver.kt`
+- `app/src/main/java/com/baotime/app/call/IncomingCallNotifications.kt`
 - `app/src/test/java/com/baotime/app/network/FaceTimePushHandlerTest.kt`
+- `app/src/test/java/com/baotime/app/call/UnifiedPushRegistrarTest.kt`
 
 **Estimated scope:** Medium: 3-5 files (stop and split if larger)
 

@@ -457,7 +457,7 @@ Each implementation milestone leaves `:app:test`, `:app:assembleDebug`, `:app:as
 | Password in query string | Med | Server-mandated; HTTPS off-LAN; never log URL |
 | WebView vs Chrome/Edge | Med | Task 13; do not claim Apple support |
 | AGP 9.6 alpha | Med | No extra alpha deps |
-| Local Mac `tasks/` conflict | Med | Parent must not overwrite an unrelated plan at `/Users/brandon/Downloads/facetime_android` |
+| Local `tasks/` conflict | Med | Parent must not overwrite an unrelated plan at `<repo-root>` |
 
 ## Open questions (human)
 

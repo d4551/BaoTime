@@ -101,7 +101,7 @@ object RecentsTabUi {
         val duration = if (includeDuration && record.durationSec > 0) {
             context.getString(R.string.call_duration_fmt, formatDuration(record.durationSec))
         } else ""
-        return "$direction • $date$duration"
+        return context.getString(R.string.recents_caption_fmt, direction, "$date$duration")
     }
 
     /** mm:ss, or h:mm:ss past an hour. */

@@ -1,20 +1,12 @@
 package com.baotime.app.call
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
-import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.net.toUri
-import com.baotime.app.MainActivity
 import com.baotime.app.R
 import com.baotime.app.routing.UrlRouter
 import com.baotime.app.system.SystemIntegration
@@ -47,38 +39,11 @@ class IncomingCallListenerService : NotificationListenerService() {
                 seenKeys.remove(seenKeys.first())
             }
         }
-        showIncomingCall(url, extras.getCharSequence(Notification.EXTRA_TITLE)?.toString())
-    }
-
-    private fun showIncomingCall(url: String, caller: String?) {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) return
-        ensureChannel(this)
-        val open = Intent(this, MainActivity::class.java).apply {
-            action = Intent.ACTION_VIEW
-            data = url.toUri()
-            putExtra(EXTRA_INCOMING_CALL, true)
-            putExtra(Intent.EXTRA_TITLE, caller)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        }
-        val pending = PendingIntent.getActivity(
-            this, url.hashCode(), open,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        IncomingCallNotifications.postNlsUrlInvite(
+            context = this,
+            url = url,
+            caller = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
         )
-        val callerLabel = caller?.takeIf { it.isNotBlank() } ?: getString(R.string.default_call_label)
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(getString(R.string.incoming_call_title))
-            .setContentText(getString(R.string.incoming_call_body_fmt, callerLabel))
-            .setCategory(NotificationCompat.CATEGORY_CALL)
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setContentIntent(pending)
-            .setFullScreenIntent(pending, true)
-            .setAutoCancel(true)
-            .build()
-        NotificationManagerCompat.from(this).notify(url.hashCode(), notification)
     }
 
     companion object {

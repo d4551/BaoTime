@@ -90,7 +90,7 @@ class CallSessionController(
 
     fun refreshPipEligibility() {
         val current = session ?: return
-        if (!ForegroundSurface.isTop(current.overlay.rootView)) {
+        if (current.shareInFlight || !ForegroundSurface.isTop(current.overlay.rootView)) {
             disableAutoPip(current.activity)
         } else if (!current.activity.isInPictureInPictureMode &&
             current.activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
@@ -147,6 +147,7 @@ class CallSessionController(
             type = "text/plain"
             putExtra(Intent.EXTRA_TEXT, current.url)
         }
+        current.shareInFlight = true
         disableAutoPip(activity)
         activity.startActivity(Intent.createChooser(send, activity.getString(R.string.action_share)))
     }
@@ -155,8 +156,12 @@ class CallSessionController(
         val url: String, val recordId: String, val audio: CallAudioRouter
     ) {
         val startedAt = SystemClock.elapsedRealtime()
+        var shareInFlight = false
         val onLifecycle = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (session === this && event == Lifecycle.Event.ON_RESUME) refreshPipEligibility()
+            if (session === this && event == Lifecycle.Event.ON_RESUME) {
+                shareInFlight = false
+                refreshPipEligibility()
+            }
         }
         val onLayout = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             if (session === this) refreshPipEligibility()

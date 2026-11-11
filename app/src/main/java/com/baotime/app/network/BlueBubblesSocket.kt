@@ -146,10 +146,11 @@ class BlueBubblesSocket(
                 callLifecycle.onConfigChanged(generation)
                 closeActiveEngineLocked()
             }
-            if (activeEngine != null &&
-                activeGeneration == generation &&
+            if (activeGeneration == generation &&
                 activeBaseUrl == baseUrl &&
-                (_state.value is SocketConnectionState.Connected || _state.value is SocketConnectionState.Connecting)
+                ((_state.value is SocketConnectionState.Connected && activeEngine != null) ||
+                    (_state.value is SocketConnectionState.Connecting &&
+                        (activeEngine != null || connectJob?.isActive == true)))
             ) {
                 return
             }

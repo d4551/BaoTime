@@ -31,6 +31,7 @@ class IncomingCallController(
         app: BaoTimeApp,
         onDismissSheets: () -> Unit,
         onHistoryUpdated: () -> Unit,
+        onLifecycleStateChanged: (CallLifecycleState) -> Unit = {},
         onAnswerFailed: suspend () -> Unit
     ) {
         activity.lifecycleScope.launch {
@@ -43,6 +44,7 @@ class IncomingCallController(
                             IncomingPushReceiver.cancelAllCallNotifications(activity)
                         }
                         syncState(state)
+                        onLifecycleStateChanged(state)
                     }
                 }
                 launch { app.historyUpdated.collect { onHistoryUpdated() } }
