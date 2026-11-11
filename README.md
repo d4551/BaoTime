@@ -1,6 +1,27 @@
 # BaoTime
 
+[![Version 1.1.0](https://img.shields.io/badge/version-1.1.0-087535)](#build-and-install)
+[![minSdk 29](https://img.shields.io/badge/minSdk-29-3DDC84?logo=android&logoColor=white)](#build-and-install)
+[![targetSdk / compileSdk 37](https://img.shields.io/badge/targetSdk%20%2F%20compileSdk-37-3DDC84?logo=android&logoColor=white)](#build-and-install)
+[![AGP 9.6.0-alpha03](https://img.shields.io/badge/AGP-9.6.0--alpha03-3DDC84)](#build-and-install)
+[![Gradle 9.9.0](https://img.shields.io/badge/Gradle-9.9.0-02303A?logo=gradle&logoColor=white)](#build-and-install)
+[![Daemon JDK 25](https://img.shields.io/badge/Daemon%20JDK-25-ED8B00?logo=openjdk&logoColor=white)](#build-and-install)
+[![Kotlin AGP built-in](https://img.shields.io/badge/Kotlin-AGP%20built--in-7F52FF?logo=kotlin&logoColor=white)](#code-map)
+[![OkHttp 5.5.1](https://img.shields.io/badge/OkHttp-5.5.1-009688)](#architecture)
+[![Socket.IO v4 (2.1.2)](https://img.shields.io/badge/Socket.IO%20v4-2.1.2-010101?logo=socketdotio&logoColor=white)](#architecture)
+[![UnifiedPush v2.1](https://img.shields.io/badge/UnifiedPush-v2.1-4E5EE4)](#incoming-call-delivery)
+
+<p align="center">
+  <img src="assets/baotime_icon_512.png" width="128" alt="BaoTime adaptive launcher mark, green gradient with a camera glyph">
+</p>
+
 BaoTime is an Android app for joining FaceTime web rooms, creating shareable links through a Mac running BlueBubbles, and answering incoming invitations. It runs on Android 10 or later. You can join an existing link without a Mac connection.
+
+## ELI5
+
+- **Got a FaceTime link?** Open it in BaoTime on your Android phone. You can join without setting up a Mac.
+- **Want to start a call?** BaoTime asks BlueBubbles on your Mac for a FaceTime link. Share the link with the person you want to call, and you can meet in the same room.
+- **Getting a call on your Mac?** BaoTime can show an invitation on your phone. Tap **Accept** to open the room. Enable BaoTime notifications to see alerts while the app is in the background.
 
 ## Use BaoTime
 
@@ -63,6 +84,268 @@ For [instrumented tests](app/src/androidTest/java/com/baotime/app/), select test
 | Native journeys, contacts, history, credential storage, and room UI | Dedicated audit emulator, `auditFixture=true`, and an `evidenceRun` of lowercase letters, digits, or hyphens |
 | `InstalledLauncherTest` | `installationCheck=true` and `evidenceRun` |
 | `DeviceConnectionCheckTest` | Xiaomi deployment device, `deploymentCheck=true`, and `expectedServer` matching the Tailscale HTTPS URL in the local `filesDir/deployment-connection-input.json` fixture |
+
+## Architecture
+
+### System overview
+
+```mermaid
+flowchart TB
+  subgraph androidDevice ["Android device (com.baotime.app)"]
+    app["BaoTimeApp (process scope)"]
+    sock["BlueBubblesSocket (Socket.IO v4)"]
+    life["CallLifecycle (state machine)"]
+    reg["UnifiedPushRegistrar (baotime_push)"]
+    push["IncomingPushReceiver + FaceTimePushHandler"]
+    nls["IncomingCallListenerService"]
+    notif["IncomingCallNotifications"]
+    ui["MainActivity Views + Controllers"]
+    cfg["AppConfig + Keystore AES/GCM"]
+    hist["CallHistory SharedPreferences"]
+    contacts["ContactsCache"]
+    client["BlueBubblesClient (OkHttp 5.5.1)"]
+    room["FaceTime WebView (URL + media gate)"]
+
+    app --> sock
+    app --> life
+    app --> reg
+    sock -->|"ft-call-status-changed / incoming-facetime"| life
+    push -->|"MESSAGE"| life
+    push -->|"NEW_ENDPOINT / UNREGISTERED / REGISTRATION_FAILED"| reg
+    life -->|"background Ringing / cancel"| notif
+    nls -->|"FaceTime URL from notification"| notif
+    notif -->|"CATEGORY_CALL + fullScreenIntent"| ui
+    life -->|"StateFlow CallLifecycleState"| ui
+    ui -->|"accept / decline / room lifecycle"| life
+    life -->|"answer / leave HTTP"| client
+    reg -->|"POST /api/v1/fcm/device"| client
+    ui --> cfg
+    ui --> hist
+    ui --> contacts
+    ui --> client
+    ui --> room
+    contacts -->|"GET /api/v1/contact"| client
+  end
+
+  subgraph macHost ["Your Mac"]
+    bbs["BlueBubbles server v1.9.12"]
+    helper["FaceTime helper + Private API"]
+    bbs --> helper
+  end
+
+  subgraph externalPeers ["Distributors, companion apps, and Apple"]
+    upDist["UnifiedPush distributor"]
+    bbApp["BlueBubbles or Beeper app"]
+    apple["facetime.apple.com"]
+  end
+
+  reg -->|"REGISTER broadcast"| upDist
+  upDist -->|"Endpoint, message, or registration status"| push
+  bbApp -->|"notification text"| nls
+  sock -->|"WebSocket or polling"| bbs
+  bbs -->|"live call events"| sock
+  client -->|"HTTPS or HTTP LAN"| bbs
+  helper --> apple
+  room -->|"canonical HTTPS room only"| apple
+```
+
+### CallLifecycle state machine
+
+`BaoTimeApp` owns one `CallLifecycle` for the app process. It deduplicates Socket.IO and UnifiedPush events by call UUID and uses connection and invitation generations to discard stale results. Notification-listener invitations carry a room URL and can open it directly.
+
+```mermaid
+stateDiagram-v2
+  [*] --> Idle
+
+  Idle --> Ringing: UUID or notification link received
+  Idle --> InRoom: outgoing or direct URL onRoomOpened
+
+  Ringing --> Answering: accept() with callUuid
+  Ringing --> JoiningUrl: accept() with NLS faceTimeUrl
+  Ringing --> Declining: decline() with callUuid
+  Ringing --> Terminal: decline() (URL-only) / status_id 6 / 30s expiry / config change
+  Ringing --> Ringing: displaced by newer non-duplicate invite
+
+  Declining --> Terminal: mark Declined and request best-effort leave
+
+  Answering --> Connecting: POST /facetime/answer returns valid room URL
+  Answering --> Declining: decline() while HTTP answer in flight
+  Answering --> Terminal: status_id 6 / HTTP failure / config change
+
+  JoiningUrl --> InRoom: onRoomOpened
+  Connecting --> InRoom: onRoomOpened
+
+  InRoom --> Idle: onRoomClosed (outgoing or direct link)
+  InRoom --> Terminal: onRoomClosed (Completed for invited call)
+```
+
+## Call flows
+
+### Create a link, then join
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant App as MainActivity
+  participant BB as BlueBubbles v1.9.12
+  participant Web as FaceTime WebView
+  participant Apple as facetime.apple.com
+
+  User->>App: Create FaceTime Link
+  App->>App: debounce one in-flight create
+  opt Callee handle typed (non-URL)
+    App->>BB: GET /api/v1/handle/availability/facetime?address=...
+    BB-->>App: advisory available true / false / error (never blocks create)
+  end
+  App->>BB: POST /api/v1/facetime/session
+  alt Created canonical HTTPS FaceTime URL
+    BB-->>App: data.link
+    App->>App: record outgoing history + CallLifecycle.onRoomOpened
+    App->>Web: loadRoom(data.link)
+    Web->>Apple: open HTTPS room (JS enabled for room)
+    Apple-->>Web: WebRTC camera or mic permission request
+    opt Android camera or microphone permission is missing
+      Web-->>User: Show Continue prompt
+      User->>Web: Tap Continue to request Android permission
+    end
+  else Missing config, helper off, HTTP error, or non-room link
+    App->>App: Map the failure to a connection or room error
+    App-->>User: Toast Could not create a FaceTime link
+  end
+```
+
+### Incoming BlueBubbles Socket.IO or UnifiedPush call (UUID)
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant BB as BlueBubbles v1.9.12
+  participant Ingress as BlueBubblesSocket or IncomingPushReceiver
+  participant Life as CallLifecycle
+  participant UI as MainActivity / IncomingCallNotifications
+  participant Web as FaceTime WebView
+
+  BB->>Ingress: ft-call-status-changed (status_id 4, uuid, caller)
+  Ingress->>Life: onIncomingUuid(uuid, caller, configGeneration)
+  Life->>UI: Ringing (in-app overlay or background CATEGORY_CALL alert)
+  alt User taps Accept within 30s
+    User->>Life: accept()
+    Life->>BB: POST /api/v1/facetime/answer/:call_uuid
+    alt Valid HTTPS FaceTime room URL returned
+      BB-->>Life: data.link
+      Life->>UI: Connecting(url)
+      UI->>Web: record incoming + loadRoom(url)
+    else Decline, remote hangup, config change, or server failure
+      Life->>UI: Terminal + cancel call notification
+      opt Decline, hangup while answering, or a late successful answer
+        Life->>BB: best-effort POST /api/v1/facetime/leave/:call_uuid
+      end
+    end
+  else User taps Decline or 30s elapse while ringing
+    Life->>BB: best-effort POST /api/v1/facetime/leave/:call_uuid
+    Life->>UI: record unanswered + cancel call notification
+  else Remote status_id 6 while ringing
+    Life->>UI: record unanswered + cancel call notification
+  end
+```
+
+### Incoming BlueBubbles or Beeper notification fallback (URL-only)
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant BBApp as BlueBubbles or Beeper app
+  participant NLS as IncomingCallListenerService
+  participant Notif as IncomingCallNotifications
+  participant App as MainActivity
+  participant Life as CallLifecycle
+  participant Hist as CallHistory
+
+  BBApp->>NLS: StatusBarNotification (com.bluebubbles.messaging or com.beeper.android)
+  NLS->>NLS: extract canonical https://facetime.apple.com URL
+  alt Unseen notification key (LRU 64)
+    NLS->>Notif: notifyIncomingCall (30s timeout, API 34+ FSI gate)
+    Notif->>App: VIEW intent + incoming extra
+    App->>Life: onIncomingNlsUrl(url, caller, configGeneration)
+    Life-->>User: Ringing (Accept or Decline)
+    alt User taps Accept
+      User->>Life: accept() -> JoiningUrl(url)
+      App->>Hist: record incoming
+      App->>App: loadRoom(url) (no /facetime/answer REST call)
+    else User taps Decline or 30s expiry
+      Life->>Hist: record unanswered (no /facetime/leave REST call)
+    end
+  else Duplicate notification key
+    NLS->>NLS: ignore
+  end
+```
+
+### UnifiedPush discovery and endpoint registration
+
+```mermaid
+sequenceDiagram
+  participant App as BaoTimeApp / MainActivity
+  participant Reg as UnifiedPushRegistrar
+  participant Dist as UnifiedPush distributor
+  participant Rx as IncomingPushReceiver
+  participant BB as BlueBubbles v1.9.12
+
+  App->>Reg: Discover installed distributor on launch or Settings save
+  opt Distributor found
+    Reg->>Dist: REGISTER with connector token and verification PendingIntent
+  end
+  opt Cached endpoint available
+    App->>BB: POST /api/v1/fcm/device
+  end
+  Dist->>Rx: NEW_ENDPOINT (token, endpoint)
+  Rx->>Reg: Validate token and save nonempty endpoint
+  alt Endpoint accepted
+    Reg-->>Rx: Saved endpoint
+    Rx->>Rx: goAsync()
+    Rx->>App: registerPushEndpointNow(endpoint)
+    App->>BB: POST /api/v1/fcm/device
+  else Token or endpoint rejected
+    Reg-->>Rx: Ignore the event
+  end
+  opt Distributor sends UNREGISTERED or REGISTRATION_FAILED
+    Dist->>Rx: Registration status with connector token
+    Rx->>Reg: Clear cached endpoint when the token matches
+  end
+```
+
+### Room URL and media gate
+
+```mermaid
+flowchart TD
+  start["loadRoom(url) or main-frame navigation"]
+  check{"HTTPS on facetime.apple.com with a room path or query, default port or 443, and no userinfo?"}
+  jsOn["Enable JavaScript and load room"]
+  blocked["Block the URL and show the secure-room warning"]
+  sub{"Subframe HTTPS on apple.com, icloud.com, or their subdomains?"}
+  allowSub["Allow subframe"]
+  blockSub["Block subframe"]
+  mediaReq{"Camera or microphone request from an HTTPS Apple media origin?"}
+  sysPerm{"Requested Android camera or microphone permissions already granted?"}
+  contPrompt["Show Continue and request Android permissions"]
+  userPerm{"Permissions granted?"}
+  allowMedia["Grant requested camera or microphone access to WebView"]
+  denyMedia["Deny WebView permission request"]
+
+  start --> check
+  check -->|"yes"| jsOn
+  check -->|"no"| blocked
+  jsOn --> sub
+  sub -->|"yes"| allowSub
+  sub -->|"no"| blockSub
+  jsOn --> mediaReq
+  mediaReq -->|"yes"| sysPerm
+  mediaReq -->|"no"| denyMedia
+  sysPerm -->|"yes"| allowMedia
+  sysPerm -->|"no"| contPrompt
+  contPrompt --> userPerm
+  userPerm -->|"yes"| allowMedia
+  userPerm -->|"no"| denyMedia
+```
 
 ## Code map
 

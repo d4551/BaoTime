@@ -10,12 +10,11 @@ class UrlRouterTest {
 
     @Test
     fun extractFaceTimeUrl_findsJoinLinkInMessageText() {
-        val sample = "Incoming call! Join here: https://facetime.apple.com/join#v=1&p=Y3zVDtI5EfGXxqon0188VQ&k=KQ9C9-gRoeyoOPeDx33OACcw9AWzUWfL7YNXteGXz68."
-        val extracted = UrlRouter.extractFaceTimeUrl(sample)
-        assertEquals(
-            "https://facetime.apple.com/join#v=1&p=Y3zVDtI5EfGXxqon0188VQ&k=KQ9C9-gRoeyoOPeDx33OACcw9AWzUWfL7YNXteGXz68",
-            extracted
-        )
+        val expected = java.net.URI(
+            "https", UrlRouter.FACETIME_HOST, "/join", null, javaClass.simpleName
+        ).toASCIIString()
+        val sample = "Incoming call! Join here: $expected."
+        assertEquals(expected, UrlRouter.extractFaceTimeUrl(sample))
     }
 
     @Test
