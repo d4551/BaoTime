@@ -6,6 +6,11 @@
     <item name="room_pip" type="id" />
     <item name="room_reload" type="id" />
     <item name="screen_title" type="id" />
+    <item name="new_call_action" type="id" />
+    <item name="clear_history_action" type="id" />
+    <item name="setup_action" type="id" />
+    <item name="contacts_search" type="id" />
+    <item name="recents_status" type="id" />
     <item name="tab_recents" type="id" />
     <item name="tab_contacts" type="id" />
 </resources>

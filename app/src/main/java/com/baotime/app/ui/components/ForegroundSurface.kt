@@ -1,16 +1,33 @@
 package com.baotime.app.ui.components
 
 import android.app.Activity
+import android.content.res.Configuration
+import android.os.Build
 import android.view.View
 import android.view.ViewGroup
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowCompat
+import android.view.Window
+import android.view.WindowInsetsController
+import android.view.WindowManager
 import androidx.core.view.doOnAttach
 import androidx.core.view.doOnDetach
 import com.baotime.app.R
 
 /** Per-host foreground ownership, including removal of a covered surface out of order. */
 object ForegroundSurface {
+    fun applyDefaultBars(window: Window) {
+        val appearance = defaultBarAppearance(window)
+        applyBars(window, appearance.lightStatus, appearance.lightNavigation)
+    }
+
+    internal fun refreshHomeAppearance(host: ViewGroup, home: View, fallbackFocus: View) {
+        val stack = host.getTag(R.id.foreground_surface_state)
+        if (stack is SurfaceStack) stack.refreshHomeAppearance(home, fallbackFocus)
+        else {
+            val context = host.context
+            if (context is Activity) applyDefaultBars(context.window)
+        }
+    }
+
     fun isTop(root: ViewGroup): Boolean {
         val host = root.parent
         if (host !is ViewGroup) return false
@@ -19,7 +36,7 @@ object ForegroundSurface {
     }
 
     fun bind(root: ViewGroup, entry: View, title: CharSequence, lightStatusBars: Boolean? = null,
-        lightNavigationBars: Boolean? = null, onTopChanged: ((Boolean) -> Unit)? = null
+        lightNavigationBars: Boolean? = null, systemBarColor: Int? = null, onTopChanged: ((Boolean) -> Unit)? = null
     ) {
         root.doOnAttach {
             val host = root.parent
@@ -27,9 +44,8 @@ object ForegroundSurface {
                 val tagged = host.getTag(R.id.foreground_surface_state)
                 val stack = if (tagged is SurfaceStack) tagged else SurfaceStack(host)
                 host.setTag(R.id.foreground_surface_state, stack)
-                val surface = Surface(root, entry, lightStatusBars, lightNavigationBars, onTopChanged)
-                ViewCompat.requestApplyInsets(root)
-                ViewCompat.setAccessibilityPaneTitle(root, title)
+                val surface = Surface(root, entry, lightStatusBars, lightNavigationBars, systemBarColor, onTopChanged)
+                root.accessibilityPaneTitle = title
                 stack.add(surface)
                 root.doOnDetach { stack.remove(surface) }
             }
@@ -37,7 +53,9 @@ object ForegroundSurface {
     }
 
     private data class Surface(val root: ViewGroup, val entry: View, val lightStatusBars: Boolean?,
-        val lightNavigationBars: Boolean?, val onTopChanged: ((Boolean) -> Unit)?)
+        val lightNavigationBars: Boolean?, val systemBarColor: Int?, val onTopChanged: ((Boolean) -> Unit)?)
+    private data class BarAppearance(val lightStatus: Boolean, val lightNavigation: Boolean)
+    private data class FittedBars(val status: Int, val navigation: Int, val flags: Int)
     private data class Original(val accessibility: Int, val focusability: Int?) {
         fun restore(view: View) {
             view.importantForAccessibility = accessibility
@@ -48,14 +66,24 @@ object ForegroundSurface {
     private class SurfaceStack(private val host: ViewGroup) {
         private val originals = mutableMapOf<View, Original>()
         private val surfaces = mutableListOf<Surface>()
-        private val previousFocus = host.findFocus()
-        private val activity = host.context
-        private val bars = if (activity is Activity) WindowCompat.getInsetsController(activity.window, activity.window.decorView) else null
-        private val navigationContrast = if (activity is Activity) activity.window.isNavigationBarContrastEnforced else null
-        private val lightStatus = bars?.isAppearanceLightStatusBars
-        private val lightNavigation = bars?.isAppearanceLightNavigationBars
+        private var previousFocus = host.findFocus()
+        private val window = host.context.let { context -> if (context is Activity) context.window else null }
+        private val navigationContrast = window?.isNavigationBarContrastEnforced
+        private var barAppearance = window?.let(::readBars)
+        private val fittedBars = if (window != null && Build.VERSION.SDK_INT < 35) FittedBars(
+            window.statusBarColor, window.navigationBarColor, window.attributes.flags and BAR_BACKGROUND_FLAGS
+        ) else null
 
         fun isTop(root: ViewGroup): Boolean = surfaces.lastOrNull()?.root === root
+
+        fun refreshHomeAppearance(home: View, fallbackFocus: View) {
+            previousFocus = previousFocus?.let { previous ->
+                if (previous.isAttachedToWindow) previous else home.findViewById<View>(previous.id) ?: fallbackFocus
+            }
+            val hostWindow = window
+            if (hostWindow != null) barAppearance = defaultBarAppearance(hostWindow)
+            applyTop()
+        }
 
         fun add(surface: Surface) {
             (0 until host.childCount).map(host::getChildAt).forEach { view ->
@@ -90,14 +118,69 @@ object ForegroundSurface {
                     if (view is ViewGroup) view.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
                 }
             }
-            if (activity is Activity && navigationContrast != null) {
-                activity.window.isNavigationBarContrastEnforced =
+            applyWindowBars(top)
+        }
+
+        private fun applyWindowBars(top: Surface?) {
+            val appearance = barAppearance
+            if (window != null && navigationContrast != null && appearance != null) {
+                window.isNavigationBarContrastEnforced =
                     if (top?.lightStatusBars == false || top?.lightNavigationBars == false) false else navigationContrast
-            }
-            if (lightStatus != null && lightNavigation != null) {
-                bars?.isAppearanceLightStatusBars = top?.lightStatusBars ?: lightStatus
-                bars?.isAppearanceLightNavigationBars = top?.lightNavigationBars ?: lightNavigation
+                applyBars(window, top?.lightStatusBars ?: appearance.lightStatus,
+                    top?.lightNavigationBars ?: appearance.lightNavigation)
+                if (fittedBars != null) {
+                    val color = top?.systemBarColor
+                    val flags = if (color == null) fittedBars.flags else WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS
+                    window.setFlags(flags, BAR_BACKGROUND_FLAGS)
+                    window.statusBarColor = color ?: fittedBars.status
+                    window.navigationBarColor = color ?: fittedBars.navigation
+                }
             }
         }
+    }
+
+    private const val BAR_BACKGROUND_FLAGS = WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS or
+        WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS or WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION
+
+    private fun defaultBarAppearance(window: Window): BarAppearance {
+        val night = window.context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        val light = night != Configuration.UI_MODE_NIGHT_YES
+        return BarAppearance(light, light)
+    }
+
+    private fun readBars(window: Window): BarAppearance {
+        if (Build.VERSION.SDK_INT >= 35) {
+            val appearance = window.insetsController?.systemBarsAppearance ?: 0
+            return BarAppearance(
+                appearance and WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS != 0,
+                appearance and WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS != 0
+            )
+        }
+        val flags = window.decorView.systemUiVisibility
+        return BarAppearance(flags and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR != 0,
+            flags and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR != 0)
+    }
+
+    private fun applyBars(window: Window, lightStatus: Boolean, lightNavigation: Boolean) {
+        val decor = window.decorView
+        if (Build.VERSION.SDK_INT >= 35) {
+            val controller = window.insetsController ?: return
+            val status = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+            val navigation = WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            controller.setSystemBarsAppearance(if (lightStatus) status else 0, status)
+            controller.setSystemBarsAppearance(if (lightNavigation) navigation else 0, navigation)
+            return
+        }
+
+        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q && (lightStatus || lightNavigation)) {
+            val translucentStatus = if (lightStatus) WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS else 0
+            val translucentNavigation = if (lightNavigation) WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION else 0
+            window.clearFlags(translucentStatus or translucentNavigation)
+            window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+        }
+        val status = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+        val navigation = View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        val appearance = (if (lightStatus) status else 0) or (if (lightNavigation) navigation else 0)
+        decor.systemUiVisibility = (decor.systemUiVisibility and (status or navigation).inv()) or appearance
     }
 }

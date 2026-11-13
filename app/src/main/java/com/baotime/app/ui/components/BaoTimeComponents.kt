@@ -1,14 +1,18 @@
 package com.baotime.app.ui.components
 
+import android.graphics.drawable.LayerDrawable
+import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.annotation.StringRes
 import com.baotime.app.R
 import com.baotime.app.ui.theme.BaoTimeMotion
 import com.baotime.app.ui.theme.BaoTimeTheme
@@ -21,10 +25,8 @@ object BaoTimeComponents {
     ): Button = Button(theme.context).apply {
         text = label
         isAllCaps = false
-        setTextColor(theme.controlForeground(textColor))
-        setTextSize(TypedValue.COMPLEX_UNIT_PX, theme.textSizeControlPx)
+        styleActionButton(theme, this, bgColor, textColor)
         typeface = theme.typefaceControl
-        background = theme.controlBackground(bgColor)
         stateListAnimator = null
         minHeight = theme.minTouchTarget
         minWidth = theme.minTouchTarget
@@ -36,11 +38,41 @@ object BaoTimeComponents {
         setOnClickListener { onClick(this) }
     }
 
+    internal fun styleActionButton(theme: BaoTimeTheme, button: Button, fill: Int = theme.colorBaoGreen,
+        text: Int = theme.colorOnAccent) {
+        button.background = theme.controlBackground(fill)
+        button.setTextColor(theme.controlForeground(text))
+        button.setTextSize(TypedValue.COMPLEX_UNIT_PX, theme.textSizeControlPx)
+    }
+
+    /** Canonical single-line text field: theme-owned typography, underline focus state and touch height. */
+    fun textField(theme: BaoTimeTheme, hintRes: Int, value: String = "",
+        inputType: Int = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+    ): EditText = EditText(theme.context).apply {
+        id = View.generateViewId()
+        isSaveEnabled = false
+        setHint(hintRes)
+        styleTextField(theme, this)
+        setPadding(0, theme.spaceMd, 0, theme.spaceMd)
+        setSingleLine(true)
+        this.inputType = inputType
+        setText(value)
+        minHeight = theme.minTouchTarget
+        minimumHeight = theme.minTouchTarget
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+    }
+
+    internal fun styleTextField(theme: BaoTimeTheme, field: EditText) {
+        field.setHintTextColor(theme.colorTextHint)
+        field.setTextColor(theme.colorTextPrimary)
+        field.setTextSize(TypedValue.COMPLEX_UNIT_PX, theme.textSizeBodyPx)
+        field.background = theme.fieldBackground()
+    }
+
     fun screenNote(theme: BaoTimeTheme, text: String, textColor: Int = theme.colorTextSecondary): TextView =
         TextView(theme.context).apply {
             this.text = text
-            setTextColor(textColor)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, theme.textSizeBodyPx)
+            styleTitle(theme, this, textColor)
             setPadding(0, theme.spaceXl, 0, 0)
         }
 
@@ -48,8 +80,7 @@ object BaoTimeComponents {
     fun badgeView(theme: BaoTimeTheme, text: String): TextView = TextView(theme.context).apply {
         this.text = text
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        setTextColor(theme.colorTextSecondary)
-        setTextSize(TypedValue.COMPLEX_UNIT_PX, theme.textSizeCaptionPx)
+        styleCaption(theme, this)
         typeface = theme.typefaceEmphasis
         gravity = Gravity.CENTER
         minimumWidth = theme.infoSize
@@ -65,16 +96,35 @@ object BaoTimeComponents {
 
     fun titleText(theme: BaoTimeTheme, text: String): TextView = TextView(theme.context).apply {
         this.text = text
-        setTextColor(theme.colorTextPrimary)
-        setTextSize(TypedValue.COMPLEX_UNIT_PX, theme.textSizeBodyPx)
+        styleTitle(theme, this)
         typeface = theme.typefaceEmphasis
     }
 
     fun captionText(theme: BaoTimeTheme, text: String): TextView = TextView(theme.context).apply {
         this.text = text
-        setTextColor(theme.colorTextSecondary)
-        setTextSize(TypedValue.COMPLEX_UNIT_PX, theme.textSizeCaptionPx)
+        styleCaption(theme, this)
     }
+
+    internal fun styleTitle(theme: BaoTimeTheme, view: TextView, color: Int = theme.colorTextPrimary,
+        size: Float = theme.textSizeBodyPx) {
+        view.setTextColor(color)
+        view.setTextSize(TypedValue.COMPLEX_UNIT_PX, size)
+    }
+
+    internal fun styleCaption(theme: BaoTimeTheme, view: TextView, color: Int = theme.colorTextSecondary) {
+        view.setTextColor(color)
+        view.setTextSize(TypedValue.COMPLEX_UNIT_PX, theme.textSizeCaptionPx)
+    }
+
+    internal fun fieldLabel(theme: BaoTimeTheme, @StringRes text: Int, field: EditText): TextView =
+        captionText(theme, theme.context.getString(text)).apply { labelFor = field.id }
+
+    internal fun actionFailure(theme: BaoTimeTheme, message: Int): TextView =
+        captionText(theme, theme.context.getString(message)).apply {
+            setTextColor(theme.colorDanger)
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            visibility = View.GONE
+        }
 
     class RowAction(val iconRes: Int, val descriptionRes: Int, val bgColor: Int? = null,
         val iconTint: Int? = null, val onClick: (View) -> Unit)
@@ -89,10 +139,26 @@ object BaoTimeComponents {
             scaleType = ImageView.ScaleType.CENTER_INSIDE
         }
 
-    fun listRow(theme: BaoTimeTheme, monogram: String, title: String, caption: String,
+    internal class ListRow(
+        val root: LinearLayout,
+        private val monogram: TextView?,
+        private val title: TextView,
+        private val caption: TextView,
+        private val chevron: ImageView?
+    ) {
+        fun updateTheme(theme: BaoTimeTheme) {
+            root.background = theme.listRowBackground()
+            monogram?.let { styleCaption(theme, it) }
+            styleTitle(theme, title)
+            styleCaption(theme, caption)
+            chevron?.imageTintList = theme.controlForeground(theme.colorTextHint)
+        }
+    }
+
+    internal fun listRow(theme: BaoTimeTheme, monogram: String, title: String, caption: TextView,
         actions: List<RowAction>, badgeIconRes: Int? = null, badgeTint: Int? = null,
         badgeDescriptionRes: Int? = null, showChevron: Boolean = false
-    ): LinearLayout {
+    ): ListRow {
         val row = LinearLayout(theme.context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -100,29 +166,31 @@ object BaoTimeComponents {
             minimumHeight = theme.minTouchTarget
             background = theme.listRowBackground()
         }
-        if (badgeIconRes != null && badgeTint != null && badgeDescriptionRes != null) {
+        val monogramView = if (badgeIconRes != null && badgeTint != null && badgeDescriptionRes != null) {
             row.addView(iconBadge(theme, badgeIconRes, badgeTint, badgeDescriptionRes))
-        } else if (monogram.isNotEmpty()) row.addView(badgeView(theme, monogram))
+            null
+        } else if (monogram.isNotEmpty()) badgeView(theme, monogram).also(row::addView)
+        else null
         val info = infoColumn(theme)
-        info.addView(titleText(theme, title))
-        info.addView(captionText(theme, caption))
+        val heading = titleText(theme, title)
+        info.addView(heading)
+        info.addView(caption)
         row.addView(info)
         actions.forEach { row.addView(iconActionButton(theme, it)) }
-        if (showChevron) row.addView(ImageView(theme.context).apply {
+        val chevron = if (showChevron) ImageView(theme.context).apply {
             setImageResource(R.drawable.ic_chevron)
             imageTintList = theme.controlForeground(theme.colorTextHint)
             layoutParams = LinearLayout.LayoutParams(theme.infoSize, theme.infoSize)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        })
-        return row
+        }.also(row::addView) else null
+        return ListRow(row, monogramView, heading, caption, chevron)
     }
 
     /** A native actionable target with centered artwork, keyboard focus and native ripple feedback. */
     fun iconActionButton(theme: BaoTimeTheme, action: RowAction): ImageButton = ImageButton(theme.context).apply {
         setImageResource(action.iconRes)
         contentDescription = context.getString(action.descriptionRes)
-        background = theme.controlBackground(action.bgColor ?: context.getColor(R.color.color_control_clear), oval = true)
-        imageTintList = theme.controlForeground(action.iconTint ?: theme.colorTextPrimary)
+        styleIconAction(theme, this, action.bgColor ?: theme.colorControlClear, action.iconTint ?: theme.colorTextPrimary)
         stateListAnimator = null
         layoutParams = LinearLayout.LayoutParams(theme.minTouchTarget, theme.minTouchTarget).apply { marginStart = theme.spaceXs }
         scaleType = ImageView.ScaleType.CENTER
@@ -131,39 +199,61 @@ object BaoTimeComponents {
         setOnClickListener { action.onClick(it) }
     }
 
+    internal fun styleIconAction(theme: BaoTimeTheme, button: ImageButton, fill: Int, tint: Int) {
+        button.background = theme.controlBackground(fill, oval = true)
+        button.imageTintList = theme.controlForeground(tint)
+    }
+
     fun animateRowIn(view: View, index: Int) {
         BaoTimeMotion.rowIn(view, index, view.resources.getDimension(R.dimen.space_md))
     }
 
-    fun actionRow(theme: BaoTimeTheme, iconRes: Int, labelRes: Int,
-        contentColor: Int = theme.colorTextPrimary, onClick: () -> Unit
-    ): LinearLayout = LinearLayout(theme.context).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        minimumHeight = theme.minTouchTarget
-        setPadding(theme.spaceMd, theme.spaceSm, theme.spaceMd, theme.spaceSm)
-        background = theme.controlBackground(theme.colorControlClear)
-        contentDescription = context.getString(labelRes)
-        isFocusable = true
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = theme.spaceXs }
-        setOnClickListener { onClick() }
-        addView(ImageView(context).apply {
+    internal class ActionRow(
+        theme: BaoTimeTheme,
+        iconRes: Int,
+        labelRes: Int,
+        private val destructive: Boolean = false,
+        onClick: () -> Unit
+    ) {
+        private val icon = ImageView(theme.context).apply {
             setImageResource(iconRes)
-            imageTintList = theme.controlForeground(contentColor)
             layoutParams = LinearLayout.LayoutParams(theme.iconSize, theme.iconSize)
             isDuplicateParentStateEnabled = true
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        })
-        addView(TextView(context).apply {
-            text = context.getString(labelRes)
+        }
+        private val label = TextView(theme.context).apply {
+            setText(labelRes)
             isDuplicateParentStateEnabled = true
-            setTextColor(theme.controlForeground(contentColor))
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, theme.textSizeBodyPx)
             setPadding(theme.spaceMd, 0, 0, 0)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        })
+        }
+
+        val view = LinearLayout(theme.context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = theme.minTouchTarget
+            setPadding(theme.spaceMd, theme.spaceSm, theme.spaceMd, theme.spaceSm)
+            contentDescription = context.getString(labelRes)
+            isFocusable = true
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = theme.spaceXs }
+            setOnClickListener { onClick() }
+            addView(icon)
+            addView(label)
+        }
+
+        init {
+            updateTheme(theme)
+        }
+
+        fun updateTheme(theme: BaoTimeTheme) {
+            val foreground = theme.controlForeground(if (destructive) theme.colorDanger else theme.colorTextPrimary)
+            view.background = theme.controlBackground(theme.colorControlClear)
+            icon.imageTintList = foreground
+            label.setTextColor(foreground)
+            label.setTextSize(TypedValue.COMPLEX_UNIT_PX, theme.textSizeBodyPx)
+        }
     }
 
     /** One accessible native target owns the circular call action and its separate caption. */
@@ -178,15 +268,20 @@ object BaoTimeComponents {
         contentDescription = context.getString(descriptionRes)
         minWidth = theme.callControlSize + theme.spaceMd * 2
         minimumWidth = minWidth
-        val icon = requireNotNull(context.getDrawable(iconRes)).mutate()
+        styleCallControl(theme, this, iconRes, bgColor, captionColor, iconTint)
+        compoundDrawablePadding = theme.spaceSm
+    }
+
+    internal fun styleCallControl(theme: BaoTimeTheme, button: Button, iconRes: Int, fill: Int,
+        captionColor: Int, iconTint: Int) {
+        styleActionButton(theme, button, theme.colorControlClear, captionColor)
+        val icon = requireNotNull(button.context.getDrawable(iconRes)).mutate()
         icon.setTintList(theme.controlForeground(iconTint))
-        val circle = android.graphics.drawable.LayerDrawable(arrayOf(theme.controlBackground(bgColor, oval = true), icon)).apply {
+        val circle = LayerDrawable(arrayOf(theme.controlBackground(fill, oval = true), icon)).apply {
             setLayerGravity(1, Gravity.CENTER)
             setLayerSize(1, theme.callControlIconSize, theme.callControlIconSize)
             setBounds(0, 0, theme.callControlSize, theme.callControlSize)
         }
-        setCompoundDrawables(null, circle, null, null)
-        compoundDrawablePadding = theme.spaceSm
-        setTextSize(TypedValue.COMPLEX_UNIT_PX, theme.textSizeControlPx)
+        button.setCompoundDrawables(null, circle, null, null)
     }
 }

@@ -8,6 +8,7 @@ sealed class ServerFailure {
     data object CredentialsUnavailable : ServerFailure()
     data object UrlMissing : ServerFailure()
     data object UrlRejected : ServerFailure()
+    data object ConnectionChanged : ServerFailure()
     data object Unauthorized : ServerFailure()
     data object HelperUnavailable : ServerFailure()
     data object UnsupportedVersion : ServerFailure()
@@ -27,9 +28,6 @@ data class BlueBubblesServerStatus(
     /** Whether the server satisfies the pinned 1.9.12 + Private API + helper capability gate. */
     val isFaceTimeCapable: Boolean
         get() = ServerCapability.verifyFaceTimeCapability(this) == null
-
-    fun capabilityFailure(): ServerFailure? =
-        ServerCapability.verifyFaceTimeCapability(this)
 }
 
 /** Result of asking the server to create a FaceTime session link. */
@@ -59,8 +57,9 @@ enum class FaceTimeAvailabilityResult {
 }
 
 /** Snapshot of connection credentials for a single request. */
-data class EndpointSnapshot(
+data class EndpointSnapshot @JvmOverloads constructor(
     val url: String,
     val password: PasswordRead,
-    val revision: Long
+    val revision: Long,
+    val macGeneration: Long? = null
 )

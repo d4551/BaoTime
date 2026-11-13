@@ -3,7 +3,8 @@
     android:width="@dimen/icon_size"
     android:height="@dimen/icon_size"
     android:viewportWidth="24"
-    android:viewportHeight="24">
+    android:viewportHeight="24"
+    android:autoMirrored="true">
     <path
         android:fillColor="@android:color/transparent"
         android:strokeColor="@color/color_text_primary"

@@ -1,7 +1,7 @@
 package com.baotime.app.data
 
 /**
- * A single call entry. The companion owns the record-id prefix and the call-type range.
+ * A single call entry. The companion owns the record-id prefix and stored call types.
  * Decode requires every field.
  */
 data class BaoCallRecord(
@@ -21,10 +21,6 @@ data class BaoCallRecord(
         const val TYPE_INCOMING = 1
         const val TYPE_OUTGOING = 2
         const val TYPE_MISSED = 3
-
-        /** Inclusive bounds of a valid callType field. */
-        const val CALL_TYPE_MIN = TYPE_INCOMING
-        const val CALL_TYPE_MAX = TYPE_MISSED
     }
 }
 

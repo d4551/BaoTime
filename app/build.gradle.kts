@@ -1,5 +1,5 @@
 plugins {
-    alias(libs.plugins.android.application)
+    id("com.android.application")
 }
 
 android {
@@ -29,20 +29,21 @@ android {
 }
 
 dependencies {
-    implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.activity.ktx)
-    implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.okhttp)
-    implementation(libs.socket.io.client) {
+    val okhttpVersion = "5.5.1"
+    implementation("androidx.core:core-ktx:1.19.1")
+    implementation("androidx.activity:activity-ktx:1.13.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    implementation("com.squareup.okhttp3:okhttp:$okhttpVersion")
+    implementation("io.socket:socket.io-client:2.1.2") {
         exclude(group = "org.json", module = "json")
     }
 
-    androidTestImplementation(libs.androidx.test.runner)
-    androidTestImplementation(libs.androidx.test.junit)
-    androidTestImplementation(libs.androidx.test.uiautomator)
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.4.1")
 
-    testImplementation(libs.junit)
-    testImplementation(libs.org.json)
-    testImplementation(libs.mockwebserver)
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20260814")
+    testImplementation("com.squareup.okhttp3:mockwebserver:$okhttpVersion")
 }

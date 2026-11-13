@@ -12,6 +12,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicLong
 
+interface CallSignaling {
+    suspend fun answer(callUuid: String, connectionRevision: Long): FaceTimeSessionResult
+    suspend fun leave(callUuid: String, connectionRevision: Long): Boolean
+}
+
 /**
  * Process-scoped state store governing incoming FaceTime invitations, answer/leave HTTP
  * cancellation, config-generation invalidation, and 30-second local ringing expiry.
@@ -26,14 +31,30 @@ class CallLifecycle(
     private val scope: CoroutineScope,
     initialConfigGeneration: Long = 0L,
     private val ringingTimeoutMs: Long = DEFAULT_RINGING_TIMEOUT_MS,
-    private val answerCall: suspend (callUuid: String) -> FaceTimeSessionResult,
-    private val leaveCall: suspend (callUuid: String) -> Boolean,
+    private val signaling: CallSignaling,
     private val onMissedInvite: suspend (invite: CallInvite, reason: TerminalReason) -> Unit = { _, _ -> },
     private val onAnswerFailed: (invite: CallInvite, failure: ServerFailure) -> Unit = { _, _ -> }
 ) {
-    private val lock = Any()
+    constructor(
+        scope: CoroutineScope,
+        initialConfigGeneration: Long = 0L,
+        ringingTimeoutMs: Long = DEFAULT_RINGING_TIMEOUT_MS,
+        answerCall: suspend (String) -> FaceTimeSessionResult,
+        leaveCall: suspend (String) -> Boolean,
+        onMissedInvite: suspend (CallInvite, TerminalReason) -> Unit = { _, _ -> },
+        onAnswerFailed: (CallInvite, ServerFailure) -> Unit = { _, _ -> }
+    ) : this(scope, initialConfigGeneration, ringingTimeoutMs, object : CallSignaling {
+        override suspend fun answer(callUuid: String, connectionRevision: Long) = answerCall(callUuid)
+        override suspend fun leave(callUuid: String, connectionRevision: Long) = leaveCall(callUuid)
+    }, onMissedInvite, onAnswerFailed)
+
+    private val lock = StateMonitor()
+    private class StateMonitor
     private val inviteCounter = AtomicLong(0L)
+    private var pendingOpening: Long? = null
     private var currentConfigGeneration: Long = initialConfigGeneration
+    private var currentMacGeneration = 0L
+    private val terminalUuids = LinkedHashSet<String>()
     private var expiryJob: Job? = null
     private var answerJob: Job? = null
 
@@ -55,10 +76,11 @@ class CallLifecycle(
         var displacedInvite: CallInvite? = null
         var displacedWasAnswering = false
         val accepted: CallInvite? = synchronized(lock) {
-            if (configGeneration != currentConfigGeneration) return false
+            if (configGeneration != currentConfigGeneration || cleanUuid in terminalUuids || roomOwnsLifecycleLocked()) return false
             val active = activeInviteLocked()
             if (active != null && active.callUuid == cleanUuid) return false
-            if (_state.value is CallLifecycleState.Ringing || _state.value is CallLifecycleState.Answering) {
+            if (active != null) {
+                rememberTerminalUuidLocked(active.callUuid)
                 displacedInvite = active
                 displacedWasAnswering = _state.value is CallLifecycleState.Answering
                 cancelActiveJobsLocked()
@@ -71,13 +93,14 @@ class CallLifecycle(
                 inviteGeneration = inviteCounter.incrementAndGet(),
                 source = source
             )
+            pendingOpening = null
             _state.value = CallLifecycleState.Ringing(next)
             startExpiryLocked(next)
             next
         }
         displacedInvite?.let { previous ->
             val prevUuid = previous.callUuid
-            if (prevUuid != null && prevUuid != cleanUuid) launchBestEffort { leaveCall(prevUuid) }
+            if (prevUuid != cleanUuid) leaveInvite(previous)
             val reason = if (displacedWasAnswering) TerminalReason.Disconnected else TerminalReason.Missed
             launchBestEffort { onMissedInvite(previous, reason) }
         }
@@ -93,14 +116,15 @@ class CallLifecycle(
         val cleanUrl = UrlRouter.extractFaceTimeUrl(faceTimeUrl) ?: return false
         var displacedInvite: CallInvite? = null
         val accepted: CallInvite? = synchronized(lock) {
-            if (configGeneration != currentConfigGeneration) return false
+            if (configGeneration != currentConfigGeneration || roomOwnsLifecycleLocked()) return false
             val current = _state.value
             val active = activeInviteLocked()
             if (active != null && active.source == InviteSource.NlsUrl && active.faceTimeUrl == cleanUrl) return false
             if ((current is CallLifecycleState.Ringing || current is CallLifecycleState.Answering) && active?.callUuid != null) {
                 return false
             }
-            if (current is CallLifecycleState.Ringing || current is CallLifecycleState.Answering) {
+            if (active != null) {
+                rememberTerminalUuidLocked(active.callUuid)
                 displacedInvite = active
                 cancelActiveJobsLocked()
             }
@@ -112,11 +136,13 @@ class CallLifecycle(
                 inviteGeneration = inviteCounter.incrementAndGet(),
                 source = InviteSource.NlsUrl
             )
+            pendingOpening = null
             _state.value = CallLifecycleState.Ringing(next)
             startExpiryLocked(next)
             next
         }
         displacedInvite?.let { previous ->
+            leaveInvite(previous)
             launchBestEffort { onMissedInvite(previous, TerminalReason.Declined) }
         }
         return accepted != null
@@ -130,8 +156,9 @@ class CallLifecycle(
         uiEnabled: Boolean = false
     ): Boolean {
         val cleanCaller = caller.trim()
+        var displacedInvite: CallInvite? = null
         synchronized(lock) {
-            if (configGeneration != currentConfigGeneration) return false
+            if (configGeneration != currentConfigGeneration || roomOwnsLifecycleLocked()) return false
             val active = activeInviteLocked()
             if (active != null && active.source == InviteSource.SocketLegacy &&
                 active.caller == cleanCaller && active.legacyTimestampMs == timestampMs
@@ -141,6 +168,8 @@ class CallLifecycle(
             if (!uiEnabled || _state.value is CallLifecycleState.Ringing || _state.value is CallLifecycleState.Answering) {
                 return false
             }
+            displacedInvite = active
+            cancelActiveJobsLocked()
             val next = CallInvite(
                 callUuid = null,
                 faceTimeUrl = null,
@@ -150,18 +179,26 @@ class CallLifecycle(
                 source = InviteSource.SocketLegacy,
                 legacyTimestampMs = timestampMs
             )
+            pendingOpening = null
             _state.value = CallLifecycleState.Ringing(next)
             startExpiryLocked(next)
-            return true
         }
+        displacedInvite?.let { previous ->
+            leaveInvite(previous)
+            launchBestEffort { onMissedInvite(previous, TerminalReason.Declined) }
+        }
+        return true
     }
 
     /** User tapped Accept on the currently ringing invitation. */
-    fun accept(): Boolean {
-        val invite: CallInvite = synchronized(lock) {
+    @JvmOverloads
+    fun accept(expectedInviteGeneration: Long? = null): Boolean {
+        var legacyFailure: CallInvite? = null
+        val invite: CallInvite? = synchronized(lock) {
             val current = _state.value
             if (current !is CallLifecycleState.Ringing) return false
             val ringing = current.invite
+            if (expectedInviteGeneration != null && ringing.inviteGeneration != expectedInviteGeneration) return false
             if (ringing.configGeneration != currentConfigGeneration) return false
             expiryJob?.cancel()
             expiryJob = null
@@ -175,15 +212,18 @@ class CallLifecycle(
                     return true
                 }
                 else -> {
-                    _state.value = CallLifecycleState.Terminal(ringing, TerminalReason.Failed)
-                    onAnswerFailed(ringing, ServerFailure.EmptyLink)
-                    return false
+                    _state.value = CallLifecycleState.Terminal(ringing, TerminalReason.Failed, ServerFailure.EmptyLink)
+                    legacyFailure = ringing
+                    null
                 }
             }
         }
+        // Failure callback runs outside the lock: observers may re-enter the store.
+        legacyFailure?.let { onAnswerFailed(it, ServerFailure.EmptyLink) }
+        if (invite == null) return false
         val uuid = requireNotNull(invite.callUuid)
         val job = scope.launch {
-            val outcome = answerCall(uuid)
+            val outcome = signaling.answer(uuid, invite.configGeneration)
             handleAnswerResult(invite, outcome)
         }
         synchronized(lock) {
@@ -218,47 +258,69 @@ class CallLifecycle(
                     if (cleanLink != null) {
                         _state.value = CallLifecycleState.Connecting(invite.copy(faceTimeUrl = cleanLink), cleanLink)
                     } else {
-                        _state.value = CallLifecycleState.Terminal(invite, TerminalReason.Failed)
+                        rememberTerminalUuidLocked(invite.callUuid)
+                        _state.value = CallLifecycleState.Terminal(invite, TerminalReason.Failed, ServerFailure.EmptyLink)
                         notifyFailure = ServerFailure.EmptyLink
                     }
                 }
                 is FaceTimeSessionResult.Failed -> {
-                    _state.value = CallLifecycleState.Terminal(invite, TerminalReason.Failed)
-                    notifyFailure = result.failure
+                    if (result.failure == ServerFailure.ConnectionChanged) {
+                        _state.value = CallLifecycleState.Terminal(invite, TerminalReason.CancelledByConfig)
+                    } else {
+                        rememberTerminalUuidLocked(invite.callUuid)
+                        _state.value = CallLifecycleState.Terminal(invite, TerminalReason.Failed, result.failure)
+                        notifyFailure = result.failure
+                    }
                 }
             }
         }
         if (shouldLeaveLateSuccess && invite.callUuid != null) {
-            launchBestEffort { leaveCall(invite.callUuid) }
+            leaveInvite(invite)
         }
         notifyFailure?.let { failure -> onAnswerFailed(invite, failure) }
     }
 
+    /** Claims the current invitation's answer error once, even across Activity recreation. */
+    fun claimAnswerFailure(inviteGeneration: Long): ServerFailure? = synchronized(lock) {
+        val current = _state.value
+        if (current !is CallLifecycleState.Terminal || current.invite.inviteGeneration != inviteGeneration ||
+            current.invite.configGeneration != currentConfigGeneration || pendingOpening != null
+        ) return@synchronized null
+        val failure = current.answerFailure ?: return@synchronized null
+        _state.value = current.copy(answerFailure = null)
+        failure
+    }
+
     /** User tapped Decline (or dismissed the incoming overlay). */
-    fun decline(): Boolean {
+    @JvmOverloads
+    fun decline(expectedInviteGeneration: Long? = null): Boolean {
         val declined: CallInvite = synchronized(lock) {
             val invite = when (val current = _state.value) {
                 is CallLifecycleState.Ringing -> current.invite
                 is CallLifecycleState.Answering -> current.invite
                 else -> return false
             }
+            if (expectedInviteGeneration != null && invite.inviteGeneration != expectedInviteGeneration) return false
+            rememberTerminalUuidLocked(invite.callUuid)
             cancelActiveJobsLocked()
-            if (invite.callUuid != null) _state.value = CallLifecycleState.Declining(invite)
+            // Terminal is emitted directly: a same-lock Declining assignment would be conflated
+            // away by StateFlow before any collector could observe it.
             _state.value = CallLifecycleState.Terminal(invite, TerminalReason.Declined)
             invite
         }
-        declined.callUuid?.let { uuid -> launchBestEffort { leaveCall(uuid) } }
+        leaveInvite(declined)
         launchBestEffort { onMissedInvite(declined, TerminalReason.Declined) }
         return true
     }
 
-    /** Handles `ft-call-status-changed` with `status_id == 6` (`DISCONNECTED`) for the active UUID only. */
+    /** Ends only a ringing/answering UUID; after answer, Mac admitAndLeave is independent of the browser room. */
     fun onCallDisconnected(callUuid: String, configGeneration: Long = this.configGeneration): Boolean {
         val cleanUuid = callUuid.trim()
         if (cleanUuid.isEmpty()) return false
         var wasAnswering = false
         val terminated: CallInvite = synchronized(lock) {
             if (configGeneration != currentConfigGeneration) return false
+            rememberTerminalUuidLocked(cleanUuid)
             val invite = when (val current = _state.value) {
                 is CallLifecycleState.Ringing -> current.invite
                 is CallLifecycleState.Answering -> {
@@ -272,17 +334,25 @@ class CallLifecycle(
             _state.value = CallLifecycleState.Terminal(invite, TerminalReason.Disconnected)
             invite
         }
-        if (wasAnswering) launchBestEffort { leaveCall(cleanUuid) }
+        if (wasAnswering) leaveInvite(terminated)
         launchBestEffort { onMissedInvite(terminated, TerminalReason.Disconnected) }
         return true
     }
 
     /** Invoked when `AppConfig.connectionRevision` changes after Settings save. */
-    fun onConfigChanged(newConfigGeneration: Long) {
+    @JvmOverloads
+    fun onConfigChanged(newConfigGeneration: Long, macGeneration: Long? = null) {
         synchronized(lock) {
+            if (newConfigGeneration < currentConfigGeneration || (macGeneration != null && macGeneration < currentMacGeneration)) return
+            if (macGeneration != null && macGeneration > currentMacGeneration) {
+                currentMacGeneration = macGeneration
+                terminalUuids.clear()
+            }
             if (newConfigGeneration == currentConfigGeneration) return
             currentConfigGeneration = newConfigGeneration
+            pendingOpening = null
             cancelActiveJobsLocked()
+            discardAnswerFailureLocked()
             val active = activeInviteLocked()
             if (active != null && _state.value !is CallLifecycleState.InRoom && _state.value !is CallLifecycleState.Terminal) {
                 _state.value = CallLifecycleState.Terminal(active, TerminalReason.CancelledByConfig)
@@ -290,18 +360,119 @@ class CallLifecycle(
         }
     }
 
-    /** Records that the WebView room overlay has opened for [url] and [recordId]. */
-    fun onRoomOpened(url: String, recordId: String) {
-        synchronized(lock) {
-            _state.value = CallLifecycleState.InRoom(activeInviteLocked(), url, recordId)
+    /** Reserves the newest explicit opening, leaving an existing browser room alive until commit. */
+    fun beginRoomOpening(): Long {
+        var displaced: CallInvite? = null
+        val generation = synchronized(lock) {
+            val next = inviteCounter.incrementAndGet()
+            pendingOpening = next
+            discardAnswerFailureLocked()
+            if (_state.value !is CallLifecycleState.InRoom) {
+                displaced = activeInviteLocked()
+                cancelActiveJobsLocked()
+                displaced?.let {
+                    rememberTerminalUuidLocked(it.callUuid)
+                    _state.value = CallLifecycleState.Terminal(it, TerminalReason.Declined)
+                }
+            }
+            next
+        }
+        displaced?.let { previous ->
+            leaveInvite(previous)
+            launchBestEffort { onMissedInvite(previous, TerminalReason.Declined) }
+        }
+        return generation
+    }
+
+    private fun discardAnswerFailureLocked() {
+        val current = _state.value
+        if (current is CallLifecycleState.Terminal && current.answerFailure != null) {
+            _state.value = current.copy(answerFailure = null)
         }
     }
 
-    /** Records that the WebView room overlay has closed (`admitAndLeave` already left outgoing rooms on Mac). */
-    fun onRoomClosed() {
+    fun isCurrentRoomOpening(generation: Long): Boolean = synchronized(lock) {
+        pendingOpening == generation
+    }
+
+    /** Lets UI job ownership survive StateFlow conflation without guessing from an old state event. */
+    fun hasRoomOpeningOrSession(): Boolean = synchronized(lock) {
+        pendingOpening != null || _state.value is CallLifecycleState.InRoom
+    }
+
+    /** Releases only this opening; an older completion cannot release a newer request. */
+    fun cancelRoomOpening(generation: Long) {
+        synchronized(lock) {
+            if (pendingOpening == generation) pendingOpening = null
+        }
+    }
+
+    /** Whether an accepted invitation still owns this pending room after asynchronous work. */
+    fun isPendingRoom(url: String, inviteGeneration: Long): Boolean = synchronized(lock) {
+        pendingRoomInviteLocked(url, inviteGeneration) != null
+    }
+
+    /** Consumes the exact pending opening or accepted invitation; null is an immediate direct open. */
+    @JvmOverloads
+    fun onRoomOpened(
+        url: String,
+        recordId: String,
+        inviteGeneration: Long? = null,
+        openingJob: Job? = null
+    ): Boolean {
+        if (!UrlRouter.isFaceTimeRoomUrl(url) || recordId.isBlank()) return false
+        var displaced: CallInvite? = null
+        synchronized(lock) {
+            val invite = if (inviteGeneration != null && pendingOpening != inviteGeneration) {
+                pendingRoomInviteLocked(url, inviteGeneration) ?: return false
+            } else null
+            if (openingJob?.isActive == false) return false
+            if (invite == null && _state.value !is CallLifecycleState.InRoom) {
+                displaced = activeInviteLocked()
+                rememberTerminalUuidLocked(displaced?.callUuid)
+            }
+            if (invite != null) rememberTerminalUuidLocked(invite.callUuid)
+            cancelActiveJobsLocked()
+            pendingOpening = null
+            _state.value = CallLifecycleState.InRoom(invite, url, recordId)
+        }
+        displaced?.let { previous ->
+            leaveInvite(previous)
+            launchBestEffort { onMissedInvite(previous, TerminalReason.Declined) }
+        }
+        return true
+    }
+
+    private fun pendingRoomInviteLocked(url: String, inviteGeneration: Long): CallInvite? {
+        val invite = when (val current = _state.value) {
+            is CallLifecycleState.Connecting -> current.invite.takeIf { current.url == url }
+            is CallLifecycleState.JoiningUrl -> current.invite.takeIf { current.url == url }
+            else -> null
+        }
+        return invite?.takeIf {
+            it.inviteGeneration == inviteGeneration && it.configGeneration == currentConfigGeneration
+        }
+    }
+
+    /** A local opening failure can terminate only the invitation that still owns that room. */
+    fun failPendingRoom(url: String, inviteGeneration: Long): Boolean {
+        val failed = synchronized(lock) {
+            val invite = pendingRoomInviteLocked(url, inviteGeneration) ?: return false
+            rememberTerminalUuidLocked(invite.callUuid)
+            cancelActiveJobsLocked()
+            _state.value = CallLifecycleState.Terminal(invite, TerminalReason.Failed)
+            invite
+        }
+        leaveInvite(failed)
+        return true
+    }
+
+    /** Completes only the local room whose record is being closed. */
+    fun onRoomClosed(recordId: String) {
         synchronized(lock) {
             val current = _state.value
-            if (current is CallLifecycleState.InRoom) {
+            if (current is CallLifecycleState.InRoom && current.recordId == recordId) {
+                pendingOpening = null
                 val invite = current.invite
                 _state.value = if (invite != null) {
                     CallLifecycleState.Terminal(invite, TerminalReason.Completed)
@@ -310,6 +481,11 @@ class CallLifecycle(
                 }
             }
         }
+    }
+
+    private fun leaveInvite(invite: CallInvite) {
+        val uuid = invite.callUuid ?: return
+        launchBestEffort { signaling.leave(uuid, invite.configGeneration) }
     }
 
     private fun startExpiryLocked(invite: CallInvite) {
@@ -326,12 +502,20 @@ class CallLifecycle(
             val current = _state.value
             if (current !is CallLifecycleState.Ringing || current.invite.inviteGeneration != inviteGeneration) return
             val invite = current.invite
+            rememberTerminalUuidLocked(invite.callUuid)
             cancelActiveJobsLocked()
             _state.value = CallLifecycleState.Terminal(invite, TerminalReason.Expired)
             invite
         }
-        expired.callUuid?.let { uuid -> launchBestEffort { leaveCall(uuid) } }
+        leaveInvite(expired)
         launchBestEffort { onMissedInvite(expired, TerminalReason.Expired) }
+    }
+
+    private fun roomOwnsLifecycleLocked(): Boolean = _state.value is CallLifecycleState.InRoom
+
+    private fun rememberTerminalUuidLocked(uuid: String?) {
+        if (uuid == null || !terminalUuids.add(uuid)) return
+        if (terminalUuids.size > MAX_TERMINAL_UUIDS) terminalUuids.remove(terminalUuids.first())
     }
 
     private fun activeInviteLocked(): CallInvite? = when (val current = _state.value) {
@@ -340,7 +524,6 @@ class CallLifecycle(
         is CallLifecycleState.JoiningUrl -> current.invite
         is CallLifecycleState.Connecting -> current.invite
         is CallLifecycleState.InRoom -> current.invite
-        is CallLifecycleState.Declining -> current.invite
         is CallLifecycleState.Terminal, CallLifecycleState.Idle -> null
     }
 
@@ -359,5 +542,6 @@ class CallLifecycle(
 
     companion object {
         const val DEFAULT_RINGING_TIMEOUT_MS = 30_000L
+        private const val MAX_TERMINAL_UUIDS = 128
     }
 }

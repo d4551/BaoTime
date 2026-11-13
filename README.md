@@ -9,7 +9,7 @@
 [![Kotlin AGP built-in](https://img.shields.io/badge/Kotlin-AGP%20built--in-7F52FF?logo=kotlin&logoColor=white)](#code-map)
 [![OkHttp 5.5.1](https://img.shields.io/badge/OkHttp-5.5.1-009688)](#architecture)
 [![Socket.IO v4 (2.1.2)](https://img.shields.io/badge/Socket.IO%20v4-2.1.2-010101?logo=socketdotio&logoColor=white)](#architecture)
-[![UnifiedPush v2.1](https://img.shields.io/badge/UnifiedPush-v2.1-4E5EE4)](#incoming-call-delivery)
+[![ntfy UnifiedPush](https://img.shields.io/badge/UnifiedPush-ntfy-4E5EE4)](#incoming-call-delivery)
 
 <p align="center">
   <img src="assets/baotime_icon_512.png" width="128" alt="BaoTime adaptive launcher mark, green gradient with a camera glyph">
@@ -38,7 +38,7 @@ BaoTime opens one room at a time in an embedded Android WebView and offers pictu
 
 1. Run BlueBubbles Server **1.9.12** on a Mac signed in to FaceTime. Creating and answering calls through the server requires **Private API** enabled and the FaceTime helper connected. [Server 1.9.12](https://github.com/BlueBubblesApp/bluebubbles-server/releases/tag/v1.9.12) · [Private API setup](https://docs.bluebubbles.app/private-api/installation)
 2. In BaoTime, go to **Settings → Mac Connection**. Enter the server's base URL and BlueBubbles password in their separate fields, then tap **Save Connection**. Prefer HTTPS. BaoTime stores the password encrypted using Android Keystore.
-3. Check the connection status. **Saved · Mac unavailable** means the settings were saved but the connection check failed. Verify the phone can reach the Mac and check the server address and password. If the Mac is reachable and link creation still fails, check the version and helper status.
+3. Check the connection status under the main screen title. **Saved · Mac unavailable** in Settings means the settings were saved but the connection check failed. Verify the phone can reach the Mac and check the server address and password. If the Mac is reachable and link creation still fails, check the version and helper status.
 4. Optionally use **Settings → FaceTime Links** to choose BaoTime in Android’s link settings, if Android offers it. To use the device address book, grant BaoTime **Contacts** access in Android’s app settings.
 
 ### Incoming call delivery
@@ -46,10 +46,14 @@ BaoTime opens one room at a time in an embedded Android WebView and offers pictu
 | Source | Setup and behavior |
 | --- | --- |
 | Live BlueBubbles connection | Works while BaoTime’s process is running and connected to the Mac. |
-| UnifiedPush | Install an Android UnifiedPush distributor and save the Mac connection. BaoTime registers the push endpoint with BlueBubbles for background delivery. |
+| BlueBubbles webhook through ntfy | Configure the FaceTime events in BlueBubbles Webhooks using the URL BaoTime creates through ntfy. |
 | BlueBubbles or Beeper notifications | In **Settings → Incoming Invitations**, grant notification access. BaoTime can surface an invitation when one of those apps posts a notification containing a FaceTime link. |
 
-Allow BaoTime notifications in Android settings for background call alerts. If you force-stop BaoTime, reopen it to resume delivery. [Android’s stopped-state behavior](https://developer.android.com/about/versions/15/behavior-changes-all#enhanced-stop-states)
+Open BaoTime **Settings → Call alerts** to allow or manage background call alerts. **Incoming Invitations** opens Android’s separate listener access setting for BlueBubbles and Beeper notifications. If you force-stop BaoTime, reopen it to resume delivery. [Android’s stopped-state behavior](https://developer.android.com/about/versions/15/behavior-changes-all#enhanced-stop-states)
+
+BaoTime generates and stores a connector token before contacting a UnifiedPush distributor. Each `MESSAGE`, `NEW_ENDPOINT`, `UNREGISTERED`, and `REGISTRATION_FAILED` broadcast must include that exact token. The receiver ignores delivery before a token exists.
+
+For webhook delivery, install and open [ntfy for Android](https://docs.ntfy.sh/subscribe/phone/), enable UnifiedPush in ntfy, and choose an HTTPS ntfy server you trust with caller information. Enable FaceTime calling in BlueBubbles and save the Mac connection in BaoTime. Open **Settings → Background invitations → Copy webhook URL**. Add the copied URL in **BlueBubbles → Webhooks**, selecting only **FaceTime Call Status Changed (Experimental)**. Keep the URL private. The copied URL disables ntfy message caching, so a disconnected distributor can miss an invitation. After changing to another Mac, copy its new URL and remove the old webhook from the previous Mac. A password change at the same server address keeps the existing URL. [BlueBubbles webhook setup](https://docs.bluebubbles.app/client/usage-guides/using-unified-push-for-notifications) · [ntfy UnifiedPush publishing](https://docs.ntfy.sh/publish/#unifiedpush)
 
 ## Build and install
 
@@ -118,7 +122,7 @@ flowchart TB
     life -->|"StateFlow CallLifecycleState"| ui
     ui -->|"accept / decline / room lifecycle"| life
     life -->|"answer / leave HTTP"| client
-    reg -->|"POST /api/v1/fcm/device"| client
+    reg -->|"Webhook URL for current Mac"| ui
     ui --> cfg
     ui --> hist
     ui --> contacts
@@ -134,7 +138,7 @@ flowchart TB
   end
 
   subgraph externalPeers ["Distributors, companion apps, and Apple"]
-    upDist["UnifiedPush distributor"]
+    upDist["ntfy UnifiedPush distributor"]
     bbApp["BlueBubbles or Beeper app"]
     apple["facetime.apple.com"]
   end
@@ -144,6 +148,7 @@ flowchart TB
   bbApp -->|"notification text"| nls
   sock -->|"WebSocket or polling"| bbs
   bbs -->|"live call events"| sock
+  bbs -->|"FaceTime webhook JSON"| upDist
   client -->|"HTTPS or HTTP LAN"| bbs
   helper --> apple
   room -->|"canonical HTTPS room only"| apple
@@ -162,15 +167,11 @@ stateDiagram-v2
 
   Ringing --> Answering: accept() with callUuid
   Ringing --> JoiningUrl: accept() with NLS faceTimeUrl
-  Ringing --> Declining: decline() with callUuid
-  Ringing --> Terminal: decline() (URL-only) / status_id 6 / 30s expiry / config change
+  Ringing --> Terminal: decline() / status_id 6 / 30s expiry / config change
   Ringing --> Ringing: displaced by newer non-duplicate invite
 
-  Declining --> Terminal: mark Declined and request best-effort leave
-
   Answering --> Connecting: POST /facetime/answer returns valid room URL
-  Answering --> Declining: decline() while HTTP answer in flight
-  Answering --> Terminal: status_id 6 / HTTP failure / config change
+  Answering --> Terminal: decline() while HTTP answer in flight / status_id 6 / HTTP failure / config change
 
   JoiningUrl --> InRoom: onRoomOpened
   Connecting --> InRoom: onRoomOpened
@@ -263,7 +264,7 @@ sequenceDiagram
 
   BBApp->>NLS: StatusBarNotification (com.bluebubbles.messaging or com.beeper.android)
   NLS->>NLS: extract canonical https://facetime.apple.com URL
-  alt Unseen notification key (LRU 64)
+  alt First active source for this room
     NLS->>Notif: notifyIncomingCall (30s timeout, API 34+ FSI gate)
     Notif->>App: VIEW intent + incoming extra
     App->>Life: onIncomingNlsUrl(url, caller, configGeneration)
@@ -275,9 +276,12 @@ sequenceDiagram
     else User taps Decline or 30s expiry
       Life->>Hist: record unanswered (no /facetime/leave REST call)
     end
-  else Duplicate notification key
-    NLS->>NLS: ignore
+  else Another active source for the same room
+    NLS->>NLS: Track its key under the same room URL
   end
+  BBApp->>NLS: Update or remove source notification
+  NLS->>NLS: Release the previous room by source key
+  NLS->>Notif: Cancel its mirror when the last source leaves
 ```
 
 ### UnifiedPush discovery and endpoint registration
@@ -290,26 +294,27 @@ sequenceDiagram
   participant Rx as IncomingPushReceiver
   participant BB as BlueBubbles v1.9.12
 
-  App->>Reg: Discover installed distributor on launch or Settings save
-  opt Distributor found
-    Reg->>Dist: REGISTER with connector token and verification PendingIntent
-  end
-  opt Cached endpoint available
-    App->>BB: POST /api/v1/fcm/device
+  App->>Reg: Resolve current Mac and discover ntfy on resume or Settings save
+  opt ntfy and Mac configured
+    Reg->>Dist: REGISTER with connector token and Android sender identity
   end
   Dist->>Rx: NEW_ENDPOINT (token, endpoint)
-  Rx->>Reg: Validate token and save nonempty endpoint
+  Rx->>Rx: Reject unless the token matches the bound connector token
+  Rx->>Reg: Save validated HTTPS endpoint for this Mac
   alt Endpoint accepted
-    Reg-->>Rx: Saved endpoint
-    Rx->>Rx: goAsync()
-    Rx->>App: registerPushEndpointNow(endpoint)
-    App->>BB: POST /api/v1/fcm/device
+    Reg-->>App: Publish current endpoint
   else Token or endpoint rejected
     Reg-->>Rx: Ignore the event
   end
+  opt User copies webhook URL and adds it in BlueBubbles
+    BB->>Dist: POST only FaceTime events with ntfy cache disabled
+    Dist->>Rx: MESSAGE with token and bytesMessage
+  end
   opt Distributor sends UNREGISTERED or REGISTRATION_FAILED
     Dist->>Rx: Registration status with connector token
-    Rx->>Reg: Clear cached endpoint when the token matches
+    Rx->>Rx: Reject unless the token matches the bound connector token
+    Rx->>Reg: Clear cached endpoint
+    Reg-->>App: Hide copy action for the withdrawn endpoint
   end
 ```
 
@@ -355,7 +360,7 @@ flowchart TD
 | Incoming call state shared by socket, push, and notification handling | [CallLifecycle](app/src/main/java/com/baotime/app/call/CallLifecycle.kt) |
 | BlueBubbles requests and server requirements | [BlueBubblesClient](app/src/main/java/com/baotime/app/network/BlueBubblesClient.kt) and [ServerCapability](app/src/main/java/com/baotime/app/network/ServerCapability.kt) |
 | Web room navigation and media permissions | [FaceTimeWebViewHelper](app/src/main/java/com/baotime/app/ui/FaceTimeWebViewHelper.kt) |
-| Build settings and dependency pins | [App build configuration](app/build.gradle.kts) and [version catalog](gradle/libs.versions.toml) |
+| Build settings and dependency pins | [App build configuration](app/build.gradle.kts) and [Android Gradle plugin pin](build.gradle.kts) |
 
 <a name="documentation-index"></a>
 

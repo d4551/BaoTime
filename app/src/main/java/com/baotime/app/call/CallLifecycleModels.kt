@@ -1,5 +1,7 @@
 package com.baotime.app.call
 
+import com.baotime.app.network.ServerFailure
+
 /** Source of an incoming FaceTime invitation. */
 enum class InviteSource {
     SocketCalling,
@@ -46,6 +48,9 @@ sealed class CallLifecycleState {
     data class JoiningUrl(val invite: CallInvite, val url: String) : CallLifecycleState()
     data class Connecting(val invite: CallInvite, val url: String) : CallLifecycleState()
     data class InRoom(val invite: CallInvite?, val url: String, val recordId: String) : CallLifecycleState()
-    data class Declining(val invite: CallInvite) : CallLifecycleState()
-    data class Terminal(val invite: CallInvite, val reason: TerminalReason) : CallLifecycleState()
+    data class Terminal(
+        val invite: CallInvite,
+        val reason: TerminalReason,
+        val answerFailure: ServerFailure? = null
+    ) : CallLifecycleState()
 }

@@ -3,13 +3,15 @@ package com.baotime.app.routing
 import android.content.Intent
 import android.net.Uri
 import androidx.core.net.toUri
+import com.baotime.app.call.CallInvite
 
 /** A routing decision from an incoming Android Intent or URL string. */
 sealed class RoutedAction {
     data class JoinFaceTimeWebLink(
         val url: String,
         val callerOrTitle: String?,
-        val isIncomingAnswer: Boolean
+        val isIncomingAnswer: Boolean,
+        val acceptedInvite: CallInvite? = null
     ) : RoutedAction()
 
     data class InitiateFaceTimeCall(
@@ -25,7 +27,6 @@ sealed class RoutedAction {
 object UrlRouter {
 
     const val FACETIME_HOST = "facetime.apple.com"
-    const val BLANK_URL = "about:blank"
 
     private val APPLE_MEDIA_HOST_SUFFIXES = listOf("apple.com", "icloud.com")
 
@@ -41,7 +42,7 @@ object UrlRouter {
     )
 
     private val FACETIME_URL_REGEX = Regex(
-        """https://facetime\.apple\.com/(?:join)?[^\s"'<>]*""",
+        """$SCHEME_HTTPS://${Regex.escape(FACETIME_HOST)}(?::\d{1,5})?/[^\s"'<>]*""",
         RegexOption.IGNORE_CASE
     )
 
@@ -63,13 +64,26 @@ object UrlRouter {
         }
     }
 
+    /** HTTPS Apple media URL with the default TLS port and no embedded credentials. */
+    fun isAppleMediaUrl(value: String): Boolean {
+        val parts = webUrlParts(value) ?: return false
+        return parts.scheme == SCHEME_HTTPS && isAppleMediaHost(parts.host) &&
+            (parts.port == null || parts.port == 443)
+    }
+
     fun isWebScheme(scheme: String?): Boolean {
         val normalized = scheme?.lowercase() ?: return false
         return normalized == SCHEME_HTTP || normalized == SCHEME_HTTPS
     }
 
     fun webUrlParts(url: String): WebUrlParts? {
-        val match = WEB_URL_REGEX.find(url.trim()) ?: return null
+        val trimmed = url.trim()
+        // Userinfo is never accepted. Only the authority is inspected: a query or fragment may
+        // legitimately contain '@' (room links carry addresses), so cut at '/', '?' and '#' first.
+        val authority = trimmed.substringAfter("://", "")
+            .substringBefore('/').substringBefore('?').substringBefore('#')
+        if (authority.contains('@')) return null
+        val match = WEB_URL_REGEX.find(trimmed) ?: return null
         val scheme = match.groupValues[1].lowercase()
         if (scheme != SCHEME_HTTP && scheme != SCHEME_HTTPS) return null
         return WebUrlParts(
@@ -94,8 +108,9 @@ object UrlRouter {
     /** Finds one `https://facetime.apple.com/...` URL inside arbitrary text. */
     fun extractFaceTimeUrl(rawText: String?): String? {
         if (rawText.isNullOrBlank()) return null
-        val match = FACETIME_URL_REGEX.find(rawText.trim()) ?: return null
-        return match.value.trimEnd('.', ',', ')', ']', '>', ';')
+        return FACETIME_URL_REGEX.findAll(rawText.trim())
+            .map { it.value.trimEnd('.', ',', ')', ']', '>', ';') }
+            .firstOrNull(::isFaceTimeRoomUrl)
     }
 
     fun routeIntent(intent: Intent?): RoutedAction {
@@ -112,7 +127,7 @@ object UrlRouter {
                     val scheme = dataUri.scheme?.lowercase()
 
                     if (scheme == SCHEME_HTTPS) {
-                        if (isFacetimeHost(dataUri.host)) {
+                        if (isFaceTimeRoomUrl(dataString)) {
                             return RoutedAction.JoinFaceTimeWebLink(
                                 url = dataString,
                                 callerOrTitle = callerExtra,

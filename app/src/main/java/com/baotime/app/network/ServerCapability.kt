@@ -58,6 +58,7 @@ object ServerCapability {
         ServerFailure.CredentialsUnavailable -> R.string.banner_credentials_unavailable
         ServerFailure.UrlMissing -> R.string.banner_unreachable_url
         ServerFailure.UrlRejected -> R.string.banner_unreachable_rejected
+        ServerFailure.ConnectionChanged -> R.string.banner_checking
         ServerFailure.Unauthorized -> R.string.banner_unauthorized
         ServerFailure.HelperUnavailable -> R.string.banner_helper_unavailable
         ServerFailure.UnsupportedVersion -> R.string.banner_unsupported_version

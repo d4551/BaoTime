@@ -6,16 +6,17 @@ import com.baotime.app.config.PasswordRead
 import io.socket.client.IO
 import io.socket.client.Socket
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 import java.net.URI
 import java.net.URLEncoder
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 /** Process-wide Socket.IO connection state. */
 sealed class SocketConnectionState {
@@ -37,9 +38,9 @@ interface SocketEngine {
 interface SocketEngineListener {
     fun onConnect()
     fun onDisconnect()
-    fun onConnectError(error: Any?)
-    fun onCallStatusChanged(payload: Any?)
-    fun onLegacyIncoming(payload: Any?)
+    fun onConnectError(error: String?)
+    fun onCallStatusChanged(payload: String?)
+    fun onLegacyIncoming(payload: String?)
 }
 
 /** Factory creating one [SocketEngine] per connection configuration. */
@@ -64,14 +65,18 @@ object DefaultSocketEngineFactory : SocketEngineFactory {
         socket.on(Socket.EVENT_CONNECT) { listener.onConnect() }
         socket.on(Socket.EVENT_DISCONNECT) { listener.onDisconnect() }
         socket.on(Socket.EVENT_CONNECT_ERROR) { args ->
-            listener.onConnectError(args.firstOrNull())
+            listener.onConnectError(args.firstOrNull()?.toString())
         }
-        socket.on(IncomingFaceTimeParser.EVENT_CALL_STATUS_CHANGED) { args ->
-            listener.onCallStatusChanged(args.firstOrNull())
+        fun listen(event: String, receive: (String) -> Unit) {
+            socket.on(event) { args ->
+                when (val payload = args.firstOrNull()) {
+                    is JSONObject -> receive(payload.toString())
+                    is String -> receive(payload)
+                }
+            }
         }
-        socket.on(IncomingFaceTimeParser.EVENT_INCOMING_FACETIME) { args ->
-            listener.onLegacyIncoming(args.firstOrNull())
-        }
+        listen(IncomingFaceTimeParser.EVENT_CALL_STATUS_CHANGED, listener::onCallStatusChanged)
+        listen(IncomingFaceTimeParser.EVENT_INCOMING_FACETIME, listener::onLegacyIncoming)
         return object : SocketEngine {
             override fun connect() {
                 socket.connect()
@@ -83,7 +88,6 @@ object DefaultSocketEngineFactory : SocketEngineFactory {
 
             override fun close() {
                 socket.off()
-                socket.disconnect()
                 socket.close()
             }
         }
@@ -104,21 +108,27 @@ object DefaultSocketEngineFactory : SocketEngineFactory {
 class BlueBubblesSocket(
     private val scope: CoroutineScope,
     private val endpointProvider: () -> EndpointSnapshot,
-    private val pingCheck: suspend () -> ServerPingResult,
+    private val pingEndpoint: suspend (EndpointSnapshot) -> ServerPingResult,
     private val callLifecycle: CallLifecycle,
     private val engineFactory: SocketEngineFactory = DefaultSocketEngineFactory
 ) {
-    private val lock = Any()
-    private var activeGeneration: Long = -1L
+    constructor(
+        scope: CoroutineScope,
+        endpointProvider: () -> EndpointSnapshot,
+        pingCheck: suspend () -> ServerPingResult,
+        callLifecycle: CallLifecycle,
+        engineFactory: SocketEngineFactory = DefaultSocketEngineFactory
+    ) : this(scope, endpointProvider, { _ -> pingCheck() }, callLifecycle, engineFactory)
+
+    private val lock = ReentrantLock()
+    private var activeGeneration: Long = callLifecycle.configGeneration
+    private var activeAttempt = 0L
     private var activeBaseUrl: String = ""
     private var activeEngine: SocketEngine? = null
     private var connectJob: Job? = null
 
     private val _state = MutableStateFlow<SocketConnectionState>(SocketConnectionState.Disconnected)
     val state: StateFlow<SocketConnectionState> = _state.asStateFlow()
-
-    private val _events = MutableSharedFlow<IncomingFaceTimeEvent>(extraBufferCapacity = 16)
-    val events: SharedFlow<IncomingFaceTimeEvent> = _events.asSharedFlow()
 
     /**
      * Ensures the process-wide socket is connected for the current [EndpointSnapshot.revision].
@@ -132,20 +142,18 @@ class BlueBubblesSocket(
         val password = when (val read = snapshot.password) {
             is PasswordRead.Available -> read.value
             PasswordRead.Missing, is PasswordRead.Unavailable -> {
-                disconnectInternal(generation)
+                disconnectInternal(snapshot)
                 return
             }
         }
         if (baseUrl.isEmpty() || ServerUrlPolicy.check(baseUrl) is ServerUrlPolicy.Verdict.Invalid) {
-            disconnectInternal(generation)
+            disconnectInternal(snapshot)
             return
         }
 
-        synchronized(lock) {
-            if (activeGeneration != -1L && activeGeneration != generation) {
-                callLifecycle.onConfigChanged(generation)
-                closeActiveEngineLocked()
-            }
+        lock.withLock {
+            if (generation < activeGeneration) return
+            callLifecycle.onConfigChanged(generation, snapshot.macGeneration)
             if (activeGeneration == generation &&
                 activeBaseUrl == baseUrl &&
                 ((_state.value is SocketConnectionState.Connected && activeEngine != null) ||
@@ -159,36 +167,40 @@ class BlueBubblesSocket(
             activeBaseUrl = baseUrl
             _state.value = SocketConnectionState.Connecting(generation)
 
-            connectJob = scope.launch {
-                when (pingCheck()) {
+            val attempt = activeAttempt
+            connectJob = scope.launch(start = CoroutineStart.LAZY) {
+                when (pingEndpoint(snapshot)) {
                     ServerPingResult.Unauthorized -> {
-                        synchronized(lock) {
-                            if (activeGeneration == generation) {
+                        lock.withLock {
+                            if (activeAttempt == attempt) {
                                 closeActiveEngineLocked()
                                 _state.value = SocketConnectionState.AuthFailed(generation)
                             }
                         }
                     }
                     is ServerPingResult.Unreachable -> {
-                        synchronized(lock) {
-                            if (activeGeneration == generation) {
+                        lock.withLock {
+                            if (activeAttempt == attempt) {
                                 closeActiveEngineLocked()
                                 _state.value = SocketConnectionState.Offline(generation)
                             }
                         }
                     }
                     ServerPingResult.Authenticated -> {
-                        startEngine(baseUrl, password, generation)
+                        startEngine(baseUrl, password, generation, attempt)
                     }
                 }
             }
+            connectJob?.start()
         }
     }
 
-    /** Called when Settings saves a new server connection. */
-    fun onConfigChanged(newGeneration: Long) {
-        synchronized(lock) {
-            callLifecycle.onConfigChanged(newGeneration)
+    /** Invalidates the socket when a newer connection is committed. */
+    @JvmOverloads
+    fun onConfigChanged(newGeneration: Long, macGeneration: Long? = null) {
+        lock.withLock {
+            callLifecycle.onConfigChanged(newGeneration, macGeneration)
+            if (newGeneration <= activeGeneration) return
             closeActiveEngineLocked()
             activeGeneration = newGeneration
             _state.value = SocketConnectionState.Disconnected
@@ -196,50 +208,42 @@ class BlueBubblesSocket(
         ensureConnected()
     }
 
-    /** Explicitly disconnects the socket (for process shutdown or tests; NOT called from `MainActivity.onDestroy`). */
-    fun disconnect() {
-        synchronized(lock) {
-            closeActiveEngineLocked()
-            _state.value = SocketConnectionState.Disconnected
-        }
-    }
-
-    private fun disconnectInternal(generation: Long) {
-        synchronized(lock) {
-            if (activeGeneration != -1L && activeGeneration != generation) {
-                callLifecycle.onConfigChanged(generation)
-            }
+    private fun disconnectInternal(snapshot: EndpointSnapshot) {
+        lock.withLock {
+            val generation = snapshot.revision
+            if (generation < activeGeneration) return
+            callLifecycle.onConfigChanged(generation, snapshot.macGeneration)
             activeGeneration = generation
             closeActiveEngineLocked()
             _state.value = SocketConnectionState.Disconnected
         }
     }
 
-    private fun startEngine(baseUrl: String, password: String, generation: Long) {
+    private fun startEngine(baseUrl: String, password: String, generation: Long, attempt: Long) {
         val encodedPassword = URLEncoder.encode(password, Charsets.UTF_8.name())
         val listener = object : SocketEngineListener {
             override fun onConnect() {
-                synchronized(lock) {
-                    if (activeGeneration == generation) {
+                lock.withLock {
+                    if (activeAttempt == attempt) {
                         _state.value = SocketConnectionState.Connected(generation)
                     }
                 }
             }
 
             override fun onDisconnect() {
-                synchronized(lock) {
-                    if (activeGeneration == generation && _state.value !is SocketConnectionState.AuthFailed) {
+                lock.withLock {
+                    if (activeAttempt == attempt && _state.value !is SocketConnectionState.AuthFailed) {
                         _state.value = SocketConnectionState.Offline(generation)
                     }
                 }
             }
 
-            override fun onConnectError(error: Any?) {
-                val message = LogRedactor.redact(error?.toString().orEmpty())
+            override fun onConnectError(error: String?) {
+                val message = LogRedactor.redact(error.orEmpty())
                 val isAuth = message.contains("401") || message.contains("403") ||
                     message.contains("unauthorized", ignoreCase = true)
-                synchronized(lock) {
-                    if (activeGeneration == generation) {
+                lock.withLock {
+                    if (activeAttempt == attempt) {
                         _state.value = if (isAuth) {
                             SocketConnectionState.AuthFailed(generation)
                         } else {
@@ -249,47 +253,43 @@ class BlueBubblesSocket(
                 }
             }
 
-            override fun onCallStatusChanged(payload: Any?) {
-                val isCurrent = synchronized(lock) { activeGeneration == generation }
-                if (!isCurrent) return
+            override fun onCallStatusChanged(payload: String?) {
                 val parsed = IncomingFaceTimeParser.parseCallStatusChanged(payload) ?: return
-                _events.tryEmit(parsed)
-                when (parsed.status) {
-                    FaceTimeSessionStatus.INCOMING -> {
-                        callLifecycle.onIncomingUuid(
+                lock.withLock {
+                    if (activeAttempt != attempt) return
+                    when (parsed.status) {
+                        FaceTimeSessionStatus.INCOMING -> callLifecycle.onIncomingUuid(
                             callUuid = parsed.uuid,
                             caller = parsed.address.orEmpty(),
                             configGeneration = generation,
                             source = InviteSource.SocketCalling
                         )
-                    }
-                    FaceTimeSessionStatus.DISCONNECTED -> {
-                        callLifecycle.onCallDisconnected(
+                        FaceTimeSessionStatus.DISCONNECTED -> callLifecycle.onCallDisconnected(
                             callUuid = parsed.uuid,
                             configGeneration = generation
                         )
+                        FaceTimeSessionStatus.UNKNOWN,
+                        FaceTimeSessionStatus.ANSWERED,
+                        FaceTimeSessionStatus.OUTGOING -> Unit
                     }
-                    FaceTimeSessionStatus.UNKNOWN,
-                    FaceTimeSessionStatus.ANSWERED,
-                    FaceTimeSessionStatus.OUTGOING -> Unit
                 }
             }
 
-            override fun onLegacyIncoming(payload: Any?) {
-                val isCurrent = synchronized(lock) { activeGeneration == generation }
-                if (!isCurrent) return
+            override fun onLegacyIncoming(payload: String?) {
                 val parsed = IncomingFaceTimeParser.parseLegacyIncoming(payload) ?: return
-                _events.tryEmit(parsed)
-                callLifecycle.onIncomingLegacy(
-                    caller = parsed.caller.orEmpty(),
-                    timestampMs = parsed.timestampMs,
-                    configGeneration = generation
-                )
+                lock.withLock {
+                    if (activeAttempt != attempt) return
+                    callLifecycle.onIncomingLegacy(
+                        caller = parsed.caller.orEmpty(),
+                        timestampMs = parsed.timestampMs,
+                        configGeneration = generation
+                    )
+                }
             }
         }
 
-        synchronized(lock) {
-            if (activeGeneration != generation) return
+        lock.withLock {
+            if (activeAttempt != attempt) return
             val engine = engineFactory.create(baseUrl, encodedPassword, listener)
             activeEngine = engine
             engine.connect()
@@ -297,9 +297,12 @@ class BlueBubblesSocket(
     }
 
     private fun closeActiveEngineLocked() {
-        connectJob?.cancel()
+        activeAttempt++
+        val job = connectJob
+        val engine = activeEngine
         connectJob = null
-        activeEngine?.close()
         activeEngine = null
+        job?.cancel()
+        engine?.close()
     }
 }

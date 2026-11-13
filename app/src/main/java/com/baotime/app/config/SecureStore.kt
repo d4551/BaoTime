@@ -6,6 +6,8 @@ import android.util.Base64
 import java.io.IOException
 import java.security.GeneralSecurityException
 import java.security.KeyStore
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -30,7 +32,7 @@ object SecureStore {
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
     private const val IV_BYTES = 12
     private const val TAG_BITS = 128
-    private val keyInitializationLock = Any()
+    private val keyInitializationLock = ReentrantLock()
     private val base64Pattern = Regex("(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?")
 
     private fun loadExistingKey(): SecretKey? {
@@ -41,7 +43,7 @@ object SecureStore {
 
     private fun encryptionKey(): SecretKey {
         loadExistingKey()?.let { return it }
-        return synchronized(keyInitializationLock) {
+        return keyInitializationLock.withLock {
             loadExistingKey() ?: generateEncryptionKey()
         }
     }

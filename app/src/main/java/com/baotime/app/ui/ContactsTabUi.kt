@@ -1,138 +1,160 @@
 package com.baotime.app.ui
 
-import android.content.Intent
 import android.view.View
 import android.view.ViewGroup
-import android.widget.EditText
 import android.widget.LinearLayout
 import com.baotime.app.R
-import com.baotime.app.data.ContactsOutcome
+import com.baotime.app.data.ContactMatch
 import com.baotime.app.data.DeviceContact
-import com.baotime.app.routing.UrlRouter
+import com.baotime.app.data.MacContactsState
+import com.baotime.app.system.OpenSettingsResult
 import com.baotime.app.system.SystemIntegration
 import com.baotime.app.ui.components.BaoTimeComponents
 import com.baotime.app.ui.theme.BaoTimeTheme
 
-/**
- * Renders the Contacts tab: a New call card with one fully editable handle
- * field (number, Apple ID, or FaceTime link) and FaceTime/system-dial icon
- * actions, then iMessage (BlueBubbles) and device contact sections.
- * There is deliberately no numeric keypad — the full keyboard covers emails.
- */
 object ContactsTabUi {
 
-    /** Contact sections: favorites, iMessage (with sync state), and device. */
-    fun renderSections(
+    internal class Section(
         theme: BaoTimeTheme,
-        container: LinearLayout,
-        outcome: ContactsOutcome,
-        iMessageContacts: List<DeviceContact>,
-        iMessageReachable: Boolean?,
-        favorites: List<DeviceContact>,
-        query: String,
-        expandAll: Boolean,
-        onOpenActions: (DeviceContact) -> Unit,
-        onExpandAll: () -> Unit,
-        animate: Boolean = true
+        title: Int,
+        onContact: (DeviceContact, Long?) -> Unit,
+        onExpand: () -> Unit
     ) {
-        val context = theme.context
-        val normalizedQuery = query.trim().lowercase()
-        fun matches(contact: DeviceContact): Boolean =
-            normalizedQuery.isEmpty() ||
-                contact.displayName.lowercase().contains(normalizedQuery) ||
-                contact.primaryAddress.lowercase().contains(normalizedQuery)
-
-        var rowIndex = 0
-        fun addSection(titleRes: Int, contacts: List<DeviceContact>) {
-            if (contacts.isEmpty()) return
-            container.addView(sectionHeader(theme, titleRes))
-            val visible = if (expandAll) contacts else contacts.take(SECTION_INITIAL_ROWS)
-            for (contact in visible) {
-                val row = buildRow(theme, contact, onOpenActions)
-                container.addView(row)
-                if (animate && rowIndex < ANIMATED_ROWS) BaoTimeComponents.animateRowIn(row, rowIndex)
-                rowIndex++
-            }
-            if (!expandAll && contacts.size > SECTION_INITIAL_ROWS) {
-                val remaining = contacts.size - SECTION_INITIAL_ROWS
-                container.addView(
-                    BaoTimeComponents.actionButton(
-                        theme,
-                        context.resources.getQuantityString(R.plurals.contacts_show_all, remaining, remaining),
-                        theme.colorSurfaceHigh,
-                        theme.colorTextPrimary
-                    ) { onExpandAll() }
-                )
-            }
+        private val header = BaoTimeComponents.captionText(theme, theme.context.getString(title)).apply {
+            setTextColor(theme.colorTextPrimary)
+            setPadding(0, theme.spaceMd, 0, theme.spaceXs)
+            isAccessibilityHeading = true
+        }
+        private val rows = ContactRows(theme, showAddressKind = true, onContact = onContact)
+        private val more = BaoTimeComponents.actionButton(theme, "", theme.colorSurfaceHigh, theme.colorTextPrimary) {
+            onExpand()
+        }
+        val root = LinearLayout(theme.context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            addView(header)
+            addView(rows.root)
+            addView(more)
         }
 
-        val matchingMac = iMessageContacts.filter(::matches)
-        val matchingDevice = when (outcome) {
-            is ContactsOutcome.Records -> outcome.contacts.filter(::matches)
-            ContactsOutcome.Denied -> emptyList()
+        fun render(contacts: List<ContactMatch>, expanded: Boolean, animateFrom: Int?): Int {
+            val visible = if (expanded) contacts else contacts.take(SECTION_INITIAL_ROWS)
+            rows.render(visible, animateFrom)
+            val remaining = contacts.size - visible.size
+            root.visibility = if (contacts.isNotEmpty()) View.VISIBLE else View.GONE
+            more.visibility = if (remaining > 0) View.VISIBLE else View.GONE
+            if (remaining > 0) {
+                more.text = more.resources.getQuantityString(R.plurals.contacts_show_all, remaining, remaining)
+            }
+            return visible.size
         }
-        addSection(R.string.contacts_favorites_header, favorites.filter(::matches))
-        if (iMessageReachable == false) {
-            container.addView(
-                BaoTimeComponents.captionText(theme, context.getString(R.string.contacts_sync_offline))
+    }
+
+    internal class ContactRows(
+        theme: BaoTimeTheme,
+        private val showAddressKind: Boolean,
+        private val onContact: (DeviceContact, Long?) -> Unit
+    ) {
+        private var theme = theme
+        val root = LinearLayout(theme.context).apply { orientation = LinearLayout.VERTICAL }
+        private var mounted = emptyList<Row>()
+
+        fun updateTheme(theme: BaoTimeTheme) {
+            this.theme = theme
+            mounted.forEach { it.updateTheme(theme) }
+        }
+
+        private class Row(
+            theme: BaoTimeTheme,
+            showAddressKind: Boolean,
+            initialMatch: ContactMatch,
+            onContact: (DeviceContact, Long?) -> Unit
+        ) {
+            var match = initialMatch
+            private val contact = initialMatch.contact
+            private val kind = if (contact.isEmail) R.string.contact_kind_email_fmt else R.string.contact_kind_phone_fmt
+            private val address = if (showAddressKind) theme.context.getString(kind, contact.primaryAddress)
+                else contact.primaryAddress
+            private val row = BaoTimeComponents.listRow(theme,
+                contact.displayName.trim().firstOrNull()?.uppercaseChar()?.toString().orEmpty(),
+                contact.displayName, BaoTimeComponents.captionText(theme, address), emptyList(), showChevron = true
             )
-        }
-        addSection(R.string.contacts_imessage_header, matchingMac)
-
-        when (outcome) {
-            ContactsOutcome.Denied -> {
-                container.addView(BaoTimeComponents.screenNote(theme, context.getString(R.string.contacts_denied)))
-                container.addView(
-                    BaoTimeComponents.actionButton(
-                        theme,
-                        context.getString(R.string.contacts_grant),
-                        params = LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.WRAP_CONTENT,
-                            ViewGroup.LayoutParams.WRAP_CONTENT
-                        ).apply { topMargin = theme.spaceMd }
-                    ) { SystemIntegration.openAppSettings(context) }
-                )
+            val view = row.root.apply {
+                setOnClickListener { onContact(match.contact, match.macRevision) }
             }
-            is ContactsOutcome.Records -> {
-                addSection(R.string.contacts_device_header, matchingDevice)
-                if (matchingDevice.isEmpty() && matchingMac.isEmpty()) {
-                    container.addView(BaoTimeComponents.screenNote(theme, context.getString(
-                        if (query.isNotBlank()) R.string.contacts_no_matches else R.string.contacts_empty)))
+
+            fun updateTheme(theme: BaoTimeTheme) = row.updateTheme(theme)
+        }
+
+        fun render(contacts: List<ContactMatch>, animateFrom: Int? = null) {
+            val available = mounted.groupBy { it.match.identity }.mapValues { (_, rows) -> ArrayDeque(rows) }
+            val next = contacts.map { match ->
+                val previous = available[match.identity]?.removeFirstOrNull()
+                if (previous == null) Row(theme, showAddressKind, match, onContact)
+                else previous.apply { this.match = match }
+            }
+            available.values.forEach { unused -> unused.forEach { root.removeView(it.view) } }
+            next.forEachIndexed { index, row ->
+                val current = root.indexOfChild(row.view)
+                if (current == index) return@forEachIndexed
+                if (current >= 0) root.removeView(row.view)
+                root.addView(row.view, index)
+                if (current < 0 && animateFrom != null && animateFrom + index < ANIMATED_ROWS) {
+                    BaoTimeComponents.animateRowIn(row.view, animateFrom + index)
                 }
             }
+            mounted = next
+        }
+    }
+
+    internal class Status(theme: BaoTimeTheme) {
+        val view = BaoTimeComponents.screenNote(theme, "").apply {
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            visibility = View.GONE
+        }
+
+        fun show(message: Int?) {
+            val text = message?.let(view.context::getString).orEmpty()
+            view.visibility = if (message == null) View.GONE else View.VISIBLE
+            if (view.text != text) view.text = text
+        }
+    }
+
+    internal fun macStatus(state: MacContactsState?): Int? = when (state) {
+        null, MacContactsState.Loading -> R.string.state_loading
+        MacContactsState.Unavailable -> R.string.contacts_sync_offline
+        MacContactsState.NotConfigured, MacContactsState.Ready -> null
+    }
+
+    internal fun emptyStatus(query: String, deviceOnly: Boolean = false): Int = when {
+        deviceOnly && query.isBlank() -> R.string.contacts_device_empty
+        deviceOnly -> R.string.contacts_device_no_matches
+        query.isBlank() -> R.string.contacts_empty
+        else -> R.string.contacts_no_matches
+    }
+
+    internal class PermissionRecovery(theme: BaoTimeTheme) {
+        private val feedback = BaoTimeComponents.actionFailure(theme, R.string.setup_open_settings_failed)
+        val root = LinearLayout(theme.context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            addView(BaoTimeComponents.screenNote(theme, context.getString(R.string.contacts_denied)))
+            addView(BaoTimeComponents.actionButton(theme, context.getString(R.string.contacts_grant),
+                params = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = theme.spaceMd }) {
+                val result = SystemIntegration.openAppSettings(context)
+                feedback.visibility = if (result == OpenSettingsResult.NotResolvable) View.VISIBLE else View.GONE
+            })
+            addView(feedback)
+        }
+
+        fun update(denied: Boolean) {
+            root.visibility = if (denied) View.VISIBLE else View.GONE
+            if (!denied) feedback.visibility = View.GONE
         }
     }
 
     private const val SECTION_INITIAL_ROWS = 30
     private const val ANIMATED_ROWS = 8
 
-    fun loadingNote(theme: BaoTimeTheme): View =
-        BaoTimeComponents.screenNote(theme, theme.context.getString(R.string.state_loading))
-
-    private fun sectionHeader(theme: BaoTimeTheme, titleRes: Int): View =
-        BaoTimeComponents.captionText(theme, theme.context.getString(titleRes)).apply {
-            setTextColor(theme.colorTextPrimary)
-            setPadding(0, theme.spaceMd, 0, theme.spaceXs)
-        }
-
-    private fun buildRow(
-        theme: BaoTimeTheme,
-        contact: DeviceContact,
-        onOpenActions: (DeviceContact) -> Unit
-    ): View {
-        val context = theme.context
-        val kindRes = if (contact.isEmail) R.string.contact_kind_email_fmt else R.string.contact_kind_phone_fmt
-        return BaoTimeComponents.listRow(
-            theme = theme,
-            monogram = contact.displayName.trim().firstOrNull()?.uppercaseChar()?.toString().orEmpty(),
-            title = contact.displayName,
-            caption = context.getString(kindRes, contact.primaryAddress),
-            actions = emptyList(),
-            showChevron = true
-        ).apply {
-            setOnClickListener {
-                onOpenActions(contact)
-            }
-        }
-    }
 }

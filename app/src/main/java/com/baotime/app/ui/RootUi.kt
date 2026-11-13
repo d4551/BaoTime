@@ -3,6 +3,7 @@ package com.baotime.app.ui
 import android.graphics.drawable.GradientDrawable
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.FrameLayout
@@ -10,30 +11,46 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import com.baotime.app.R
 import com.baotime.app.ui.components.BaoTimeComponents
 import com.baotime.app.ui.components.GlassNavigation
+import com.baotime.app.ui.components.WindowSafeArea
 import com.baotime.app.ui.theme.BaoTimeTheme
+import kotlin.math.ceil
 
-class MainChrome(val rootFrame: FrameLayout, val setupAction: ImageView, val clearHistoryAction: ImageView,
-    val headerTitle: TextView, val tabButtons: List<Button>, val tabContentContainer: LinearLayout)
+class MainChrome(private val theme: BaoTimeTheme, val rootFrame: FrameLayout, private val setupAction: ImageView,
+    internal val home: FrameLayout, private val connectionStatus: TextView, val clearHistoryAction: ImageView, val headerTitle: TextView,
+    val tabButtons: List<Button>, val tabContentContainer: LinearLayout) {
+    fun updateConnectionState(description: String, tint: Int) {
+        setupAction.imageTintList = theme.controlForeground(tint)
+        if (connectionStatus.text != description) connectionStatus.text = description
+    }
+}
 
 /** Floating navigation above a real scrolling content layer; all geometry uses Android project tokens. */
 object RootUi {
     fun build(theme: BaoTimeTheme, onNewLink: () -> Unit, onTabSelected: (Int) -> Unit,
-        onClearHistory: () -> Unit, onOpenSetup: () -> Unit
+        onClearHistory: () -> Unit, onOpenSetup: () -> Unit,
+        root: FrameLayout = FrameLayout(theme.context), home: FrameLayout = FrameLayout(theme.context)
     ): MainChrome {
-        val root = FrameLayout(theme.context).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(theme.colorBgTop, theme.colorBg))
-        }
+        root.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(theme.colorChromeFallback, theme.colorBg))
+        val fill = ViewGroup.LayoutParams.MATCH_PARENT
+        if (home.parent == null) root.addView(home, FrameLayout.LayoutParams(fill, fill))
         val host = FrameLayout(theme.context)
-        root.addView(host, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        home.removeAllViews()
+        home.addView(host, FrameLayout.LayoutParams(fill, fill))
         val scroll = ScrollView(theme.context).apply { clipToPadding = false }
         val rows = LinearLayout(theme.context).apply { orientation = LinearLayout.VERTICAL }
         scroll.addView(rows)
         host.addView(scroll, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        // One floating top bar owns the title and actions so scrolled rows never collide
+        // with bare glyphs.
+        val topBar = LinearLayout(theme.context).apply { orientation = LinearLayout.VERTICAL }
+        val titleRow = LinearLayout(theme.context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
         val title = TextView(theme.context).apply {
             id = R.id.screen_title
             setTextColor(theme.colorTextPrimary)
@@ -42,18 +59,30 @@ object RootUi {
             gravity = Gravity.CENTER_VERTICAL
             minHeight = theme.minTouchTarget
             setPadding(0, 0, 0, 0)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
-        host.addView(title)
+        titleRow.addView(title)
+        val actions = LinearLayout(theme.context).apply { orientation = LinearLayout.HORIZONTAL }
         val newCall = BaoTimeComponents.iconActionButton(theme, BaoTimeComponents.RowAction(
-            R.drawable.ic_add, R.string.desc_new_call, iconTint = theme.colorBaoGreen) { onNewLink() })
-        host.addView(newCall)
+            R.drawable.ic_add, R.string.desc_new_call, iconTint = theme.colorBaoGreen) { onNewLink() }).apply { id = R.id.new_call_action }
+        actions.addView(newCall)
         val clearHistory = BaoTimeComponents.iconActionButton(theme, BaoTimeComponents.RowAction(
-            R.drawable.ic_delete, R.string.action_clear_history, iconTint = theme.colorDanger) { onClearHistory() })
-        host.addView(clearHistory)
+            R.drawable.ic_delete, R.string.action_clear_history, iconTint = theme.colorDanger) { onClearHistory() }).apply { id = R.id.clear_history_action }
+        actions.addView(clearHistory)
         val setup = BaoTimeComponents.iconActionButton(theme, BaoTimeComponents.RowAction(
-            R.drawable.ic_settings, R.string.desc_open_setup) { onOpenSetup() })
-        ViewCompat.setStateDescription(setup, theme.context.getString(R.string.banner_checking))
-        host.addView(setup)
+            R.drawable.ic_settings, R.string.desc_open_setup) { onOpenSetup() }).apply { id = R.id.setup_action }
+        actions.addView(setup)
+        titleRow.addView(actions)
+        topBar.addView(titleRow)
+        val connectionStatus = BaoTimeComponents.captionText(theme, theme.context.getString(R.string.banner_checking)).apply {
+            setPadding(0, 0, 0, theme.spaceSm)
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        topBar.addView(connectionStatus)
+        // The canonical opaque chrome fallback keeps scrolled rows readable under the title and
+        // actions; the live sampled glass material stays owned by the tab bar alone.
+        topBar.background = theme.surfaceDrawable(0, theme.colorChromeFallback)
+        host.addView(topBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
         var stackTopActions = false
         val actionWidth = 3 * (theme.minTouchTarget + theme.spaceXs)
         val tabs = LinearLayout(theme.context).apply {
@@ -67,13 +96,14 @@ object RootUi {
                     marginEnd = if (index == 1) 0 else theme.spaceXs
                 }) { onTabSelected(index) }.apply {
                     id = if (index == 0) R.id.tab_recents else R.id.tab_contacts
+                    labelTab(this, text)
                     GlassNavigation(theme, scroll, this)
                 }.also(tabs::addView)
         }
         tabs.addOnLayoutChangeListener { _, left, _, right, _, _, _, _, _ ->
             val available = right - left - tabs.paddingLeft - tabs.paddingRight
             val required = buttons.size * buttons.maxOf { button ->
-                maxOf(theme.minTouchTarget, kotlin.math.ceil(button.paint.measureText(button.text.toString())).toInt() +
+                maxOf(theme.minTouchTarget, ceil(button.paint.measureText(button.text.toString())).toInt() +
                     button.paddingLeft + button.paddingRight) + theme.spaceXs * 2
             }
             val stacked = required > available
@@ -93,36 +123,26 @@ object RootUi {
         }
         host.addView(tabs, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
         fun insetContent() {
-            val topPadding = maxOf(title.height, theme.minTouchTarget) +
-                (if (stackTopActions) theme.minTouchTarget else 0) + theme.spaceSm * 2 + theme.spaceMd
+            val topPadding = topBar.height + theme.spaceMd
             val bottomPadding = tabs.height + theme.spaceMd
             if (scroll.paddingTop != topPadding || scroll.paddingBottom != bottomPadding) scroll.setPadding(0, topPadding, 0, bottomPadding)
         }
         fun layoutTopChrome() {
-            title.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP).apply {
-                marginEnd = if (stackTopActions) 0 else actionWidth
-                topMargin = theme.spaceSm
-            }
-            newCall.layoutParams = FrameLayout.LayoutParams(theme.minTouchTarget, theme.minTouchTarget,
-                Gravity.TOP or Gravity.END).apply {
-                marginEnd = (theme.minTouchTarget + theme.spaceXs) * 2
-                topMargin = theme.spaceSm + if (stackTopActions) title.height else 0
-            }
-            clearHistory.layoutParams = FrameLayout.LayoutParams(theme.minTouchTarget, theme.minTouchTarget,
-                Gravity.TOP or Gravity.END).apply {
-                marginEnd = theme.minTouchTarget + theme.spaceXs
-                topMargin = theme.spaceSm + if (stackTopActions) title.height else 0
-            }
-            setup.layoutParams = FrameLayout.LayoutParams(theme.minTouchTarget, theme.minTouchTarget,
-                Gravity.TOP or Gravity.END).apply {
-                topMargin = theme.spaceSm + if (stackTopActions) title.height else 0
+            if (stackTopActions && actions.parent === titleRow) {
+                titleRow.removeView(actions)
+                topBar.addView(actions, 1, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                        gravity = Gravity.END
+                    })
+            } else if (!stackTopActions && actions.parent === topBar) {
+                topBar.removeView(actions)
+                titleRow.addView(actions)
             }
             insetContent()
         }
         host.addOnLayoutChangeListener { _, left, _, right, _, _, _, _, _ ->
             val available = right - left - host.paddingLeft - host.paddingRight
-            val required = kotlin.math.ceil(title.paint.measureText(title.text.toString())).toInt() +
+            val required = ceil(title.paint.measureText(title.text.toString())).toInt() +
                 title.paddingLeft + title.paddingRight + actionWidth
             val stacked = required > available
             if (stackTopActions != stacked) {
@@ -131,15 +151,25 @@ object RootUi {
             }
             insetContent()
         }
+        topBar.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> insetContent() }
         tabs.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> insetContent() }
         layoutTopChrome()
-        ViewCompat.setOnApplyWindowInsetsListener(host) { view, insets ->
-            val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+        WindowSafeArea.observe(host) { view, safe, _ ->
             view.setPadding(theme.spaceLg + safe.left, theme.spaceSm + safe.top,
                 theme.spaceLg + safe.right, safe.bottom + tabs.paddingBottom * 2)
-            insets
         }
-        return MainChrome(root, setup, clearHistory, title, buttons, rows)
+        return MainChrome(theme, root, setup, home, connectionStatus, clearHistory, title, buttons, rows)
+    }
+
+    fun updateRecentsLabel(button: Button, missed: Int) {
+        val context = button.context
+        val title = context.getString(R.string.tab_recents)
+        labelTab(button, if (missed > 0) context.getString(R.string.tab_recents_badge_fmt, title, missed) else title)
+    }
+
+    private fun labelTab(button: Button, label: CharSequence) {
+        button.text = label
+        button.contentDescription = button.context.getString(R.string.desc_navigation_tab, label)
     }
 
     fun styleTabs(theme: BaoTimeTheme, tabButtons: List<Button>, selectedIndex: Int) {

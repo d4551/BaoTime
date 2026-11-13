@@ -1,36 +1,41 @@
 package com.baotime.app.ui
 
+import android.text.InputType
 import android.view.View
-import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import androidx.core.widget.doAfterTextChanged
 import com.baotime.app.R
+import com.baotime.app.data.ContactsCache
 import com.baotime.app.data.ContactsSnapshot
 import com.baotime.app.data.ContactsOutcome
 import com.baotime.app.data.DeviceContact
+import com.baotime.app.data.MacContactsState
+import com.baotime.app.routing.UrlRouter
 import com.baotime.app.ui.components.BaoTimeComponents
 import com.baotime.app.ui.theme.BaoTimeTheme
 
 /** One sheet owns its input, listener and contact rows for its entire lifetime. */
 class NewCallSheetUi(
-    private val theme: BaoTimeTheme,
+    theme: BaoTimeTheme,
     initialHandle: String,
-    private val onFaceTime: (DeviceContact) -> Unit,
+    private val contacts: ContactsCache,
+    private val onFaceTime: (DeviceContact, Long?) -> Unit,
     onFaceTimeNumber: (String) -> Unit,
     onDraftChanged: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    private var theme = theme
     private var snapshot: ContactsSnapshot? = null
     private val content = ModalSheetUi.contentColumn(theme)
-    private val input = EditText(theme.context).apply {
-        hint = context.getString(R.string.input_hint)
-        setTextColor(theme.colorTextPrimary)
-        setHintTextColor(theme.colorTextHint)
-        setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, theme.textSizeBodyPx)
-        background = theme.fieldBackground()
-        setPadding(0, theme.spaceMd, 0, theme.spaceMd)
-        setSingleLine(true)
-        setText(initialHandle)
+    private val permissionStatus = ContactsTabUi.Status(theme)
+    private val macStatus = ContactsTabUi.Status(theme)
+    private val empty = ContactsTabUi.Status(theme)
+    private val rows = ContactsTabUi.ContactRows(theme, showAddressKind = false, onContact = onFaceTime)
+    private val title = BaoTimeComponents.titleText(theme, theme.context.getString(R.string.dialer_title))
+    private val explanation = BaoTimeComponents.captionText(theme, theme.context.getString(R.string.new_call_explanation))
+    private val input = BaoTimeComponents.textField(theme, R.string.input_hint, initialHandle,
+        InputType.TYPE_CLASS_TEXT).apply {
         doAfterTextChanged { value -> onDraftChanged(value.toString()); renderRows() }
     }
     private val callButton = BaoTimeComponents.actionButton(theme,
@@ -39,47 +44,53 @@ class NewCallSheetUi(
             LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = theme.spaceMd }) {
         onFaceTimeNumber(input.text.toString().trim())
     }
-    private var staticRowCount = 0
-    val rootView: View
+    private val label = BaoTimeComponents.fieldLabel(theme, R.string.input_label, input)
+    val rootView: FrameLayout
 
     init {
-        content.addView(BaoTimeComponents.titleText(theme, theme.context.getString(R.string.dialer_title)))
-        content.addView(BaoTimeComponents.captionText(theme, theme.context.getString(R.string.new_call_explanation)))
-        content.addView(BaoTimeComponents.captionText(theme, theme.context.getString(R.string.input_label)))
+        content.addView(title)
+        content.addView(explanation)
+        content.addView(label)
         content.addView(input)
         content.addView(callButton)
+        content.addView(permissionStatus.view)
+        content.addView(macStatus.view)
+        content.addView(empty.view)
+        content.addView(rows.root)
         rootView = ModalSheetUi.build(theme, content, onDismiss)
-        staticRowCount = content.childCount
         renderRows()
     }
 
+    internal fun updateTheme(theme: BaoTimeTheme) {
+        this.theme = theme
+        BaoTimeComponents.styleTitle(theme, title)
+        BaoTimeComponents.styleCaption(theme, explanation)
+        BaoTimeComponents.styleCaption(theme, label)
+        BaoTimeComponents.styleTextField(theme, input)
+        BaoTimeComponents.styleActionButton(theme, callButton)
+        BaoTimeComponents.styleTitle(theme, permissionStatus.view, theme.colorTextSecondary)
+        BaoTimeComponents.styleTitle(theme, macStatus.view, theme.colorTextSecondary)
+        BaoTimeComponents.styleTitle(theme, empty.view, theme.colorTextSecondary)
+        rows.updateTheme(theme)
+    }
+
     fun updateContacts(value: ContactsSnapshot) {
+        if (snapshot == value) return
         snapshot = value
         renderRows()
     }
 
     private fun renderRows() {
         val query = input.text.toString().trim()
-        callButton.text = theme.context.getString(if (com.baotime.app.routing.UrlRouter.wholeFaceTimeUrl(query) != null)
+        callButton.text = theme.context.getString(if (UrlRouter.wholeFaceTimeUrl(query) != null)
             R.string.action_join_link else R.string.action_create_link)
-        val filtered = snapshot?.allContacts.orEmpty().filter {
-            it.displayName.contains(query, ignoreCase = true) || it.primaryAddress.contains(query, ignoreCase = true)
-        }
-        while (content.childCount > staticRowCount) content.removeViewAt(content.childCount - 1)
-        if (filtered.isEmpty()) {
-            val state = when {
-                snapshot == null -> R.string.state_loading
-                query.isNotEmpty() -> R.string.contacts_no_matches
-                snapshot?.device == ContactsOutcome.Denied -> R.string.contacts_denied
-                else -> R.string.contacts_empty
-            }
-            content.addView(BaoTimeComponents.screenNote(theme, theme.context.getString(state)))
-        }
-        filtered.forEach { contact ->
-            content.addView(BaoTimeComponents.listRow(theme,
-                contact.displayName.trim().firstOrNull()?.uppercaseChar()?.toString().orEmpty(),
-                contact.displayName, contact.primaryAddress, emptyList(), showChevron = true
-            ).apply { setOnClickListener { onFaceTime(contact) } })
-        }
+        val current = snapshot?.let(contacts::current)
+        val matches = current?.search(query)?.all.orEmpty()
+        val denied = current?.device == ContactsOutcome.Denied
+        val complete = current?.macState == MacContactsState.Ready || current?.macState == MacContactsState.NotConfigured
+        permissionStatus.show(R.string.contacts_denied.takeIf { denied })
+        macStatus.show(ContactsTabUi.macStatus(current?.macState))
+        empty.show(ContactsTabUi.emptyStatus(query).takeIf { complete && matches.isEmpty() && (!denied || query.isNotEmpty()) })
+        rows.render(matches)
     }
 }

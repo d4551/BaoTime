@@ -4,19 +4,47 @@ import com.baotime.app.config.AppConfig
 import com.baotime.app.network.BlueBubblesClient
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
-/** A complete contact refresh, published atomically for both the tab and New call. */
+enum class MacContactsState { Loading, Ready, NotConfigured, Unavailable }
+
+data class ContactMatch(val contact: DeviceContact, val macRevision: Long?) {
+    internal val identity get() = contact to (macRevision != null)
+}
+
+data class ContactMatches(val device: List<ContactMatch>, val iMessage: List<ContactMatch>) {
+    val all = iMessage + device
+}
+
+/** Device results and the latest Mac response for one configuration revision. */
 data class ContactsSnapshot(
     val device: ContactsOutcome,
-    val iMessage: List<DeviceContact>,
-    val serverReachable: Boolean,
-    val configurationRevision: Long
+    private val remote: BlueBubblesClient.ServerContacts?,
+    val configurationRevision: Long,
+    private val macConfigured: Boolean
 ) {
-    val allContacts: List<DeviceContact> get() = iMessage + when (device) {
+    private val deviceContacts = when (device) {
         is ContactsOutcome.Records -> device.contacts
         ContactsOutcome.Denied -> emptyList()
+    }
+    private val iMessage = if (remote == null) emptyList() else {
+        val deviceKeys = deviceContacts.map { AppConfig.favoriteKey(it.primaryAddress) }.toSet()
+        remote.contacts.filter { AppConfig.favoriteKey(it.primaryAddress) !in deviceKeys }
+    }
+    val macState = when {
+        !macConfigured -> MacContactsState.NotConfigured
+        remote == null -> MacContactsState.Loading
+        remote.reachable -> MacContactsState.Ready
+        else -> MacContactsState.Unavailable
+    }
+    private val matches = ContactMatches(deviceContacts.map { ContactMatch(it, null) },
+        iMessage.map { ContactMatch(it, configurationRevision) })
+
+    fun search(query: String): ContactMatches {
+        val term = query.trim()
+        if (term.isEmpty()) return matches
+        fun matchesTerm(match: ContactMatch): Boolean = match.contact.displayName.contains(term, ignoreCase = true) ||
+            match.contact.primaryAddress.contains(term, ignoreCase = true)
+        return ContactMatches(matches.device.filter(::matchesTerm), matches.iMessage.filter(::matchesTerm))
     }
 }
 
@@ -26,31 +54,34 @@ class ContactsCache(
     private val server: BlueBubblesClient,
     private val config: AppConfig
 ) {
-    private val refreshLock = Mutex()
-    var snapshot: ContactsSnapshot? = null
-        private set
+    private var storedSnapshot: ContactsSnapshot? = null
+    val snapshot: ContactsSnapshot?
+        get() = storedSnapshot?.let(::current)
 
-    suspend fun refresh(): ContactsSnapshot = refreshLock.withLock {
-        var result: ContactsSnapshot? = null
-        while (result == null) {
-            currentCoroutineContext().ensureActive()
-            val revision = config.connectionRevision()
-            val outcome = device.queryContacts()
-            val remote = server.fetchContacts()
-            val deviceKeys = when (outcome) {
-                is ContactsOutcome.Records -> outcome.contacts.map { AppConfig.favoriteKey(it.primaryAddress) }.toSet()
-                ContactsOutcome.Denied -> emptySet()
-            }
-            if (revision == config.connectionRevision()) {
-                result = ContactsSnapshot(outcome,
-                    remote.contacts.filter { AppConfig.favoriteKey(it.primaryAddress) !in deviceKeys },
-                    remote.reachable, revision)
-                snapshot = result
-            }
-        }
-        result
+    fun current(snapshot: ContactsSnapshot): ContactsSnapshot {
+        val (url, revision) = config.connectionDestination()
+        return if (snapshot.configurationRevision == revision) snapshot
+        else ContactsSnapshot(snapshot.device, null, revision, url.isNotEmpty())
     }
 
-    fun invalidate() { snapshot = null }
+    suspend fun refresh(revision: Long, render: (ContactsSnapshot) -> Unit) {
+        suspend fun publish(snapshot: ContactsSnapshot): Boolean {
+            currentCoroutineContext().ensureActive()
+            val changed = storedSnapshot != snapshot
+            if (!config.admitConnectionOperation(revision) {
+                    if (changed) storedSnapshot = snapshot
+                    true
+                }) return false
+            if (changed) render(snapshot)
+            return true
+        }
 
+        val outcome = device.queryContacts()
+        val (url, currentRevision) = config.connectionDestination()
+        if (revision != currentRevision) return
+        val local = storedSnapshot?.takeIf { it.configurationRevision == revision }?.copy(device = outcome)
+            ?: ContactsSnapshot(outcome, null, revision, url.isNotEmpty())
+        if (!publish(local) || url.isEmpty()) return
+        publish(local.copy(remote = server.fetchContacts(revision)))
+    }
 }

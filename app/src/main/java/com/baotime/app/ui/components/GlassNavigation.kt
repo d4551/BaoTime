@@ -4,19 +4,22 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.ColorFilter
 import android.graphics.Outline
+import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.drawable.Drawable
 import android.os.Build
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import android.view.View
 import android.view.ViewTreeObserver
 import androidx.core.graphics.createBitmap
-import androidx.core.view.doOnAttach
-import androidx.core.view.doOnDetach
 import com.baotime.app.config.AppearancePreferences
 import com.baotime.app.ui.theme.BaoTimeTheme
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /** Attaches a blurred backdrop directly to a control without adding a container view. */
 class GlassNavigation(
@@ -28,111 +31,209 @@ class GlassNavigation(
     radius: Int = theme.radiusControl,
     interactive: Boolean = true
 ) {
-    private val glass = GlassSurfaceDrawable(theme, tintColor, fallbackColor, radius)
-    private val onScroll = ViewTreeObserver.OnScrollChangedListener { glass.refresh(source, target) }
-    private val onLayout = ViewTreeObserver.OnGlobalLayoutListener { glass.refresh(source, target) }
+    private val glass = GlassSurfaceDrawable(theme, source, target, tintColor, fallbackColor, radius)
+    private val onScroll = ViewTreeObserver.OnScrollChangedListener { glass.refresh() }
+    private val onLayout = ViewTreeObserver.OnGlobalLayoutListener { glass.refresh() }
     private val onTargetLayout = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-        glass.refresh(source, target)
+        glass.refresh()
+    }
+    private var observedTree: ViewTreeObserver? = null
+
+    internal fun sampleTopEdge() = glass.sampleTopEdge()
+
+    internal fun updateMaterial(theme: BaoTimeTheme, tintColor: Int, fallbackColor: Int) {
+        glass.updateMaterial(theme, tintColor, fallbackColor)
     }
 
     init {
         target.background = glass
         if (interactive) target.foreground = theme.glassControlForeground(radius)
         target.clipToOutline = true
-        target.doOnAttach {
-            source.viewTreeObserver.addOnScrollChangedListener(onScroll)
-            source.viewTreeObserver.addOnGlobalLayoutListener(onLayout)
-            target.addOnLayoutChangeListener(onTargetLayout)
-            glass.refresh(source, target)
-        }
-        target.doOnDetach {
-            if (source.viewTreeObserver.isAlive) {
-                source.viewTreeObserver.removeOnScrollChangedListener(onScroll)
-                source.viewTreeObserver.removeOnGlobalLayoutListener(onLayout)
+        // Persistent attach observer: every reattach rebinds sampling, every detach releases it.
+        val attachObserver = object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(view: View) {
+                observedTree = target.viewTreeObserver.apply {
+                    addOnScrollChangedListener(onScroll)
+                    addOnGlobalLayoutListener(onLayout)
+                }
+                target.addOnLayoutChangeListener(onTargetLayout)
+                glass.refresh()
             }
-            target.removeOnLayoutChangeListener(onTargetLayout)
-            glass.clear()
+
+            override fun onViewDetachedFromWindow(view: View) {
+                observedTree?.takeIf { it.isAlive }?.apply {
+                    removeOnScrollChangedListener(onScroll)
+                    removeOnGlobalLayoutListener(onLayout)
+                }
+                observedTree = null
+                target.removeOnLayoutChangeListener(onTargetLayout)
+                glass.clear()
+            }
         }
+        target.addOnAttachStateChangeListener(attachObserver)
+        if (target.isAttachedToWindow) attachObserver.onViewAttachedToWindow(target)
     }
 }
 
 private class GlassSurfaceDrawable(
-    private val theme: BaoTimeTheme,
-    private val tintColor: Int,
-    private val fallbackColor: Int,
+    private var theme: BaoTimeTheme,
+    private val source: View,
+    private val target: View,
+    private var tintColor: Int,
+    private var fallbackColor: Int,
     private val radius: Int
 ) : Drawable() {
-    private val edgePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+    private val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = theme.colorGlassHighlight
         style = android.graphics.Paint.Style.STROKE
         strokeWidth = theme.hairline.toFloat()
     }
-    private val selectionPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+    private val selectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = theme.colorBaoGreen
-        style = android.graphics.Paint.Style.FILL
+        style = Paint.Style.FILL
     }
-    private val bitmapPaint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
-    private val edgeRect = android.graphics.RectF()
+    private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val edgeRect = RectF()
+    private val indicatorRect = RectF()
+    private val sampleRect = RectF()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val captureFrame = Runnable(::capture)
+    private val sourcePosition = IntArray(2)
+    private val targetPosition = IntArray(2)
     private var blurExecutor: ExecutorService? = null
-    private var refreshGeneration = 0
+    private var blurScratch: BoxBlur.Scratch? = null
+    private var captureScheduled = false
+    private var captureNeeded = false
+    private var blurRunning = false
+    private var geometryGeneration = 0
     private var sample: Bitmap? = null
     private var blurred = false
     private var focused = false
     private var selected = false
+    private var sampleTop = false
 
-    fun refresh(source: View, target: View) {
-        blurred = false
-        if (!target.isAttachedToWindow || bounds.isEmpty) return
+    fun updateMaterial(theme: BaoTimeTheme, tintColor: Int, fallbackColor: Int) {
+        this.theme = theme
+        this.tintColor = tintColor
+        this.fallbackColor = fallbackColor
+        edgePaint.color = theme.colorGlassHighlight
+        edgePaint.strokeWidth = theme.hairline.toFloat()
+        selectionPaint.color = theme.colorBaoGreen
+        clear()
+        refresh()
+    }
+
+    fun sampleTopEdge() {
+        sampleTop = true
+        clear()
+        refresh()
+    }
+
+    fun refresh() {
         if (Build.VERSION.SDK_INT < 31 || !AppearancePreferences.backdropEnabled(theme.context)) {
             clear()
-            invalidateSelf()
             return
         }
-        val generation = ++refreshGeneration
+        captureNeeded = true
+        scheduleCapture()
+    }
+
+    private fun scheduleCapture() {
+        if (!captureNeeded || captureScheduled || blurRunning || bounds.isEmpty || !target.isAttachedToWindow) return
+        captureScheduled = true
+        target.postOnAnimation(captureFrame)
+    }
+
+    private fun capture() {
+        captureScheduled = false
+        if (!target.isAttachedToWindow || bounds.isEmpty) return
+        if (!source.isAttachedToWindow || source.windowToken != target.windowToken ||
+            !AppearancePreferences.backdropEnabled(theme.context)
+        ) {
+            clear()
+            return
+        }
+        captureNeeded = false
+        val generation = geometryGeneration
         val sampleScale = minOf(1f, 512f / maxOf(bounds.width(), bounds.height()).toFloat())
         val bitmap = createBitmap((bounds.width() * sampleScale).toInt().coerceAtLeast(1),
             (bounds.height() * sampleScale).toInt().coerceAtLeast(1))
-        bitmap.eraseColor(fallbackColor)
-        val sourcePosition = IntArray(2)
-        val targetPosition = IntArray(2)
-        source.getLocationInWindow(sourcePosition)
-        target.getLocationInWindow(targetPosition)
-        val canvas = Canvas(bitmap)
-        canvas.scale(sampleScale, sampleScale)
-        canvas.translate((sourcePosition[0] - targetPosition[0]).toFloat(),
-            (sourcePosition[1] - targetPosition[1]).toFloat())
-        source.draw(canvas)
-        val executor = blurExecutor ?: Executors.newSingleThreadExecutor().also { blurExecutor = it }
-        executor.execute {
-            if (generation != refreshGeneration) {
-                bitmap.recycle()
-                return@execute
-            }
-            BoxBlur.blur(bitmap, (theme.glassBlurRadius * sampleScale).toInt().coerceIn(1, 25))
-            target.post {
-                if (generation == refreshGeneration) {
-                    sample = bitmap
-                    blurred = true
-                    invalidateSelf()
-                } else {
+        try {
+            bitmap.eraseColor(fallbackColor)
+            source.getLocationInWindow(sourcePosition)
+            target.getLocationInWindow(targetPosition)
+            val canvas = Canvas(bitmap)
+            canvas.scale(sampleScale, sampleScale)
+            val sampleY = if (sampleTop) 0 else sourcePosition[1] - targetPosition[1]
+            canvas.translate((sourcePosition[0] - targetPosition[0]).toFloat(),
+                sampleY.toFloat())
+            source.draw(canvas)
+            val executor = blurExecutor ?: Executors.newSingleThreadExecutor().also { blurExecutor = it }
+            val scratch = blurScratch ?: BoxBlur.Scratch().also { blurScratch = it }
+            val radius = (theme.glassBlurRadius * sampleScale).toInt().coerceIn(1, 25)
+            blurRunning = true
+            executor.execute {
+                val failure = try {
+                    BoxBlur.blur(bitmap, radius, scratch)
+                    null
+                } catch (failure: RuntimeException) {
+                    failure
+                }
+                val complete = Runnable { finishCapture(bitmap, generation, failure) }
+                if (!mainHandler.post {
+                        if (!target.isAttachedToWindow || !target.post(complete)) complete.run()
+                    }
+                ) {
                     bitmap.recycle()
+                    executor.shutdown()
                 }
             }
+        } catch (failure: RuntimeException) {
+            finishCapture(bitmap, generation, failure)
         }
     }
 
+    private fun finishCapture(bitmap: Bitmap, generation: Int, failure: RuntimeException?) {
+        blurRunning = false
+        if (failure != null) {
+            releaseWorker()
+            Log.w(TAG, "Backdrop capture failed", failure)
+        }
+        val eligible = target.isAttachedToWindow && source.isAttachedToWindow && source.windowToken == target.windowToken &&
+            AppearancePreferences.backdropEnabled(theme.context)
+        if (generation == geometryGeneration && eligible) {
+            sample = bitmap.takeIf { failure == null }
+            blurred = failure == null
+            invalidateSelf()
+        }
+        if (sample !== bitmap) bitmap.recycle()
+        if (!eligible) clear()
+        else scheduleCapture()
+    }
+
     fun clear() {
-        refreshGeneration++
-        blurExecutor?.shutdownNow()
-        blurExecutor = null
+        geometryGeneration++
+        target.removeCallbacks(captureFrame)
+        captureScheduled = false
+        captureNeeded = false
+        if (!blurRunning) releaseWorker()
         sample = null
         blurred = false
+        invalidateSelf()
+    }
+
+    private fun releaseWorker() {
+        blurExecutor?.shutdownNow()
+        blurExecutor = null
+        blurScratch = null
     }
 
     override fun draw(canvas: Canvas) {
         val bitmap = sample
-        if (blurred && bitmap != null) {
-            canvas.drawBitmap(bitmap, null, android.graphics.RectF(bounds), bitmapPaint)
+        // Offscreen drawing uses the same stable fallback as unsupported display surfaces.
+        if (blurred && bitmap != null && canvas.isHardwareAccelerated) {
+            sampleRect.set(bounds)
+            canvas.drawBitmap(bitmap, null, sampleRect, bitmapPaint)
         } else {
             canvas.drawColor(fallbackColor)
         }
@@ -146,15 +247,19 @@ private class GlassSurfaceDrawable(
             val indicatorWidth = theme.iconSize.toFloat()
             val indicatorHeight = theme.spaceXs.toFloat()
             val bottom = bounds.bottom - theme.spaceSm.toFloat()
-            edgeRect.set(bounds.centerX() - indicatorWidth / 2f, bottom - indicatorHeight,
+            indicatorRect.set(bounds.centerX() - indicatorWidth / 2f, bottom - indicatorHeight,
                 bounds.centerX() + indicatorWidth / 2f, bottom)
-            canvas.drawRoundRect(edgeRect, indicatorHeight / 2f, indicatorHeight / 2f, selectionPaint)
+            canvas.drawRoundRect(indicatorRect, indicatorHeight / 2f, indicatorHeight / 2f, selectionPaint)
         }
     }
 
     override fun onBoundsChange(bounds: Rect) {
         super.onBoundsChange(bounds)
+        // The previous sample no longer matches the surface geometry; drop it until a fresh blur lands.
+        geometryGeneration++
+        sample = null
         blurred = false
+        refresh()
     }
 
     override fun getOutline(outline: Outline) {
@@ -188,14 +293,31 @@ private class GlassSurfaceDrawable(
 
     @Deprecated("Deprecated in Java")
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+
+    private companion object {
+        const val TAG = "BaoTimeGlass"
+    }
 }
 
 private object BoxBlur {
-    fun blur(bitmap: Bitmap, radius: Int) {
+    // Buffers belong to one executor instance and grow once for it, then are reused across that
+    // worker's refreshes instead of allocating two full pixel arrays per scroll frame. A
+    // re-attach creates a new executor and therefore a new Scratch.
+    class Scratch {
+        var pixels = IntArray(0)
+        var workspace = IntArray(0)
+    }
+
+    fun blur(bitmap: Bitmap, radius: Int, scratch: Scratch) {
         val width = bitmap.width
         val height = bitmap.height
-        val pixels = IntArray(width * height)
-        val workspace = IntArray(width * height)
+        val size = width * height
+        if (scratch.pixels.size < size) {
+            scratch.pixels = IntArray(size)
+            scratch.workspace = IntArray(size)
+        }
+        val pixels = scratch.pixels
+        val workspace = scratch.workspace
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
         val normalizedRadius = radius.coerceIn(1, 25)
         repeat(3) {

@@ -6,12 +6,12 @@
     <string name="banner_checking">Checking BlueBubbles Server &amp; FaceTime helper…</string>
     <string name="banner_connected">Connected to your Mac</string>
     <string name="banner_unreachable_password">BlueBubbles Server unreachable: server password not set (enter it in Settings)</string>
-    <string name="banner_unreachable_url">BlueBubbles Server unreachable: server URL not configured (see Settings tab)</string>
-    <string name="banner_unreachable_rejected">BlueBubbles Server unreachable: server URL was rejected (see Settings tab)</string>
-    <string name="banner_unreachable_http">BlueBubbles Server unreachable: the server refused the request (see Settings tab)</string>
+    <string name="banner_unreachable_url">Enter your BlueBubbles server URL in Settings</string>
+    <string name="banner_unreachable_rejected">Check your BlueBubbles server URL in Settings</string>
+    <string name="banner_unreachable_http">BlueBubbles Server refused the request. Check your connection in Settings.</string>
     <string name="banner_unreachable_unknown">BlueBubbles Server status is unavailable.</string>
     <string name="banner_credentials_unavailable">Stored BlueBubbles password could not be read. Enter it again in Settings.</string>
-    <string name="banner_unauthorized">BlueBubbles Server rejected the password (see Settings tab)</string>
+    <string name="banner_unauthorized">BlueBubbles Server rejected the password. Update it in Settings.</string>
     <string name="banner_helper_unavailable">FaceTime helper and Private API must be enabled on your Mac</string>
     <string name="banner_unsupported_version">BlueBubbles Server 1.9.12 is required for FaceTime</string>
     <string name="call_advisory_unavailable">FaceTime may be unavailable for this address; creating a shareable link anyway</string>
@@ -30,18 +30,21 @@
     <string name="link_copied">Link copied</string>
     <string name="action_speaker">Speaker</string>
     <string name="action_share">Share</string>
+    <string name="share_unavailable">Sharing is unavailable on this device</string>
     <string name="tab_recents">Recents</string>
     <string name="tab_recents_badge_fmt">%1$s (%2$d)</string>
     <string name="tab_contacts">Contacts</string>
+    <string name="desc_navigation_tab">%1$s tab</string>
     <string name="tab_setup">Settings</string>
     <string name="state_loading">Loading…</string>
     <string name="error_generic">Something failed. Check Settings and try again.</string>
-    <string name="desc_dismiss_sheet">Close sheet; drag down or tap</string>
+    <string name="desc_dismiss_sheet">Dismiss sheet</string>
     <string name="desc_close_sheet">Close sheet</string>
     <string name="desc_sheet">Sheet</string>
 
     <!-- Recents -->
     <string name="recents_empty">No BaoTime calls yet. Tap New Call to start one.</string>
+    <string name="recents_unreadable">Call history couldn’t be read. Use Clear History to start over.</string>
     <string name="call_type_incoming">Link received</string>
     <string name="call_type_outgoing">Link opened</string>
     <string name="call_type_missed">Unanswered</string>
@@ -62,8 +65,11 @@
     </plurals>
     <string name="contacts_sync_offline">Mac contacts unavailable</string>
     <string name="contacts_no_matches">No matches.</string>
+    <string name="contacts_device_empty">No device contacts yet.</string>
+    <string name="contacts_device_no_matches">No matching device contacts.</string>
     <string name="contact_action_facetime">Create FaceTime Link</string>
     <string name="contact_action_dial">Dial With Phone App</string>
+    <string name="contact_dial_unavailable">Could not open the phone app on this device.</string>
     <string name="contact_action_favorite">Add To Favorites</string>
     <string name="contact_action_unfavorite">Remove From Favorites</string>
     <string name="dialer_title">New Call</string>
@@ -76,16 +82,20 @@
     <!-- Link creation and room -->
     <string name="call_generating">Generating FaceTime link via BlueBubbles Server…</string>
     <string name="call_create_failed">Could not create a FaceTime link</string>
+    <string name="call_answer_failed">Could not answer the FaceTime call</string>
     <string name="default_call_label">FaceTime Call</string>
     <string name="link_label">FaceTime Link</string>
     <string name="new_link_label">New FaceTime Link</string>
     <string name="call_status_connecting">Loading FaceTime…</string>
-    <string name="call_status_page_ready">Room open</string>
+    <string name="call_status_page_ready">FaceTime page loaded</string>
+    <string name="call_status_room_unavailable">FaceTime room unavailable</string>
+    <string name="call_status_browser_unavailable">No browser is available to open this link.</string>
     <string name="call_status_navigation_blocked">Only secure FaceTime rooms can open here.</string>
     <string name="call_pip_unavailable">Picture in picture is unavailable.</string>
     <string name="call_status_failed">Call failed</string>
     <string name="call_status_media_waiting">Continue to camera and microphone permissions</string>
     <string name="call_status_media_granted">Camera and microphone allowed for this call</string>
+    <string name="call_status_media_denied">Camera or microphone permission denied</string>
     <string name="action_allow">Continue</string>
     <string name="call_speaker_unavailable">Speaker route is unavailable.</string>
     <string name="desc_end_call">Close room</string>
@@ -109,7 +119,14 @@
     <string name="desc_open_setup">Open Settings</string>
     <string name="setup_configure">FaceTime Links</string>
     <string name="setup_incoming_configure">Incoming Invitations</string>
-    <string name="setup_open_settings_failed_fmt">Could not open settings: %1$s</string>
+    <string name="setup_call_alerts">Call alerts</string>
+    <string name="setup_webhook_title">Background invitations</string>
+    <string name="setup_webhook_no_mac">Save your Mac connection to set up background invitations.</string>
+    <string name="setup_webhook_pending">Install and open ntfy to get a webhook URL.</string>
+    <string name="setup_webhook_configure">Add this URL to BlueBubbles Webhooks for FaceTime Call Status Changed (Experimental).</string>
+    <string name="setup_webhook_copy">Copy webhook URL</string>
+    <string name="setup_webhook_unavailable">Webhook URL is unavailable.</string>
+    <string name="setup_open_settings_failed">Could not open system settings on this device.</string>
     <string name="setup_config_title">Mac Connection</string>
     <string name="setup_server_url_label">Server Address</string>
     <string name="setup_server_url_hint">https://your-server:1234</string>

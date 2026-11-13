@@ -7,6 +7,10 @@ import com.baotime.app.routing.BlueBubblesRoutes
 import com.baotime.app.routing.UrlRouter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -16,6 +20,9 @@ import java.io.IOException
 import java.net.URL
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 /** Client for the BlueBubbles server HTTP API. */
 class BlueBubblesClient(
@@ -24,13 +31,21 @@ class BlueBubblesClient(
 ) {
     constructor(config: AppConfig) : this(endpointProvider = {
         val conn = config.connection()
-        EndpointSnapshot(conn.url, conn.password, conn.revision)
+        EndpointSnapshot(conn.url, conn.password, conn.revision, conn.macGeneration)
     })
 
-    private val lock = Any()
-    private var cachedStatusRevision: Long = -1L
-    private var cachedStatusUrl: String = ""
-    private var cachedStatus: BlueBubblesServerStatus? = null
+    private val statusLock = ReentrantLock()
+    private val statusRequests = AtomicLong()
+    private val completedStatus = MutableStateFlow<ServerStatusObservation?>(null)
+    internal val serverStatuses = completedStatus.asStateFlow()
+
+    internal data class ServerStatusObservation(
+        val revision: Long,
+        val url: String,
+        val request: Long,
+        val status: BlueBubblesServerStatus,
+        val capability: BlueBubblesServerStatus?
+    )
 
     /** Retains the last redacted request URL for diagnostic verification without secret leakage. */
     @Volatile
@@ -50,9 +65,9 @@ class BlueBubblesClient(
         .readTimeout(ANSWER_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS).build()
 
     /** `GET /api/v1/ping` with the server password query parameter. */
-    suspend fun pingServer(): ServerPingResult = withContext(Dispatchers.IO) {
+    suspend fun pingServer(snapshot: EndpointSnapshot? = null): ServerPingResult = withContext(Dispatchers.IO) {
         runCatching {
-            when (val endpoint = configuredEndpoint()) {
+            when (val endpoint = configuredEndpoint(snapshot = snapshot)) {
                 is EndpointCheck.Rejected -> ServerPingResult.Unreachable(endpoint.failure)
                 is EndpointCheck.Accepted -> {
                     val response = execute(client, endpoint, BlueBubblesRoutes.PING, "GET", null)
@@ -70,50 +85,83 @@ class BlueBubblesClient(
     }
 
     /** `GET /api/v1/server/info` with the server password query parameter. */
-    suspend fun checkServerStatus(): BlueBubblesServerStatus = withContext(Dispatchers.IO) {
-        runCatching {
-            when (val endpoint = configuredEndpoint()) {
-                is EndpointCheck.Rejected -> BlueBubblesServerStatus(reachable = false, failure = endpoint.failure)
-                is EndpointCheck.Accepted -> {
-                    val response = execute(client, endpoint, BlueBubblesRoutes.SERVER_INFO, "GET", null)
-                    if (response.code == 401 || response.code == 403) {
-                        val unauthorized = BlueBubblesServerStatus(reachable = false, failure = ServerFailure.Unauthorized)
-                        cacheStatus(endpoint, unauthorized)
-                        return@withContext unauthorized
-                    }
-                    if (response.code !in 200..299) {
-                        return@withContext BlueBubblesServerStatus(reachable = false, failure = ServerFailure.HttpFailed)
-                    }
-                    val data = JSONObject(response.body).optJSONObject("data")
-                    val version = data?.optString("server_version", "").orEmpty()
-                    val privateApi = data?.optionalBoolean("private_api")
-                    val helper = data?.optionalBoolean("helper_connected")
-                    val detected = data?.optionalText("detected_imessage")
-                    if (data == null || version.isEmpty() || privateApi == null || helper == null || detected == null) {
-                        return@withContext BlueBubblesServerStatus(reachable = false, failure = ServerFailure.HttpFailed)
-                    }
-                    val tempStatus = BlueBubblesServerStatus(
-                        reachable = true,
-                        serverVersion = version,
-                        privateApiEnabled = privateApi,
-                        helperConnected = helper,
-                        detectedImessage = detected
-                    )
-                    val finalStatus = tempStatus.copy(failure = ServerCapability.verifyFaceTimeCapability(tempStatus))
-                    cacheStatus(endpoint, finalStatus)
-                    finalStatus
-                }
+    suspend fun checkServerStatus(): BlueBubblesServerStatus {
+        val request = statusRequests.incrementAndGet()
+        return withContext(Dispatchers.IO) {
+            val configuration = try {
+                endpointProvider()
+            } catch (failure: Exception) {
+                return@withContext BlueBubblesServerStatus(reachable = false, failure = classifyFailure(failure))
             }
-        }.fold(
-            onSuccess = { it },
-            onFailure = { failure -> BlueBubblesServerStatus(reachable = false, failure = classifyFailure(failure)) }
+            val endpoint = configuredEndpoint(snapshot = configuration)
+            val url = when (endpoint) {
+                is EndpointCheck.Accepted -> endpoint.url.toString()
+                is EndpointCheck.Rejected -> configuration.url.trim().trimEnd('/')
+            }
+            observeServerStatus(configuration.revision, url, request) {
+                when (endpoint) {
+                    is EndpointCheck.Rejected -> BlueBubblesServerStatus(reachable = false, failure = endpoint.failure)
+                    is EndpointCheck.Accepted -> readServerStatus(endpoint)
+                }
+            }?.status ?: BlueBubblesServerStatus(reachable = false, failure = ServerFailure.ConnectionChanged)
+        }
+    }
+
+    private suspend fun observeServerStatus(
+        revision: Long,
+        url: String,
+        request: Long,
+        read: suspend () -> BlueBubblesServerStatus
+    ): ServerStatusObservation? {
+        val status = runCatching { read() }.getOrElse { failure ->
+            BlueBubblesServerStatus(reachable = false, failure = classifyFailure(failure))
+        }
+        val coroutineContext = currentCoroutineContext()
+        return statusLock.withLock {
+            coroutineContext.ensureActive()
+            val previous = completedStatus.value
+            val matching = previous?.takeIf { it.revision == revision && it.url == url }
+            if (previous != null && (previous.revision > revision ||
+                    (previous.revision == revision && previous.request > request))) {
+                return@withLock matching
+            }
+            val capability = if (status.reachable || status.failure == ServerFailure.Unauthorized) status
+                else matching?.capability
+            ServerStatusObservation(revision, url, request, status, capability).also { completedStatus.value = it }
+        }
+    }
+
+    private suspend fun readServerStatus(endpoint: EndpointCheck.Accepted): BlueBubblesServerStatus {
+        val response = execute(client, endpoint, BlueBubblesRoutes.SERVER_INFO, "GET", null)
+        if (response.code == 401 || response.code == 403) {
+            return BlueBubblesServerStatus(reachable = false, failure = ServerFailure.Unauthorized)
+        }
+        if (response.code !in 200..299) {
+            return BlueBubblesServerStatus(reachable = false, failure = ServerFailure.HttpFailed)
+        }
+        val data = JSONObject(response.body).optJSONObject("data")
+        val version = data?.optString("server_version", "").orEmpty()
+        val privateApi = data?.optionalBoolean("private_api")
+        val helper = data?.optionalBoolean("helper_connected")
+        val detected = data?.optionalText("detected_imessage")
+        if (data == null || version.isEmpty() || privateApi == null || helper == null || detected == null) {
+            return BlueBubblesServerStatus(reachable = false, failure = ServerFailure.HttpFailed)
+        }
+        val tempStatus = BlueBubblesServerStatus(
+            reachable = true,
+            serverVersion = version,
+            privateApiEnabled = privateApi,
+            helperConnected = helper,
+            detectedImessage = detected
         )
+        return tempStatus.copy(failure = ServerCapability.verifyFaceTimeCapability(tempStatus))
     }
 
     /** `POST /api/v1/facetime/session` with the server password query parameter. */
-    suspend fun createFaceTimeSession(): FaceTimeSessionResult = withContext(Dispatchers.IO) {
+    @JvmOverloads
+    suspend fun createFaceTimeSession(expectedRevision: Long? = null): FaceTimeSessionResult = withContext(Dispatchers.IO) {
         runCatching {
-            when (val endpoint = configuredEndpoint()) {
+            when (val endpoint = configuredEndpoint(expectedRevision)) {
                 is EndpointCheck.Rejected -> FaceTimeSessionResult.Failed(endpoint.failure)
                 is EndpointCheck.Accepted -> {
                     ensureCapable(endpoint)?.let { return@withContext FaceTimeSessionResult.Failed(it) }
@@ -128,11 +176,12 @@ class BlueBubblesClient(
     }
 
     /** `POST /api/v1/facetime/answer/:call_uuid` with `{}` body (`FaceTimeApi.answer` @ `ff8bfd5`). */
-    suspend fun answerFaceTimeCall(callUuid: String): FaceTimeSessionResult = withContext(Dispatchers.IO) {
+    @JvmOverloads
+    suspend fun answerFaceTimeCall(callUuid: String, expectedRevision: Long? = null): FaceTimeSessionResult = withContext(Dispatchers.IO) {
         val trimmed = callUuid.trim()
         if (trimmed.isEmpty()) return@withContext FaceTimeSessionResult.Failed(ServerFailure.HttpFailed)
         runCatching {
-            when (val endpoint = configuredEndpoint()) {
+            when (val endpoint = configuredEndpoint(expectedRevision)) {
                 is EndpointCheck.Rejected -> FaceTimeSessionResult.Failed(endpoint.failure)
                 is EndpointCheck.Accepted -> {
                     ensureCapable(endpoint)?.let { return@withContext FaceTimeSessionResult.Failed(it) }
@@ -147,11 +196,12 @@ class BlueBubblesClient(
     }
 
     /** `POST /api/v1/facetime/leave/:call_uuid` best-effort (`facetimeRouter.ts` @ `76d2b2e`). */
-    suspend fun leaveFaceTimeCall(callUuid: String): Boolean = withContext(Dispatchers.IO) {
+    @JvmOverloads
+    suspend fun leaveFaceTimeCall(callUuid: String, expectedRevision: Long? = null): Boolean = withContext(Dispatchers.IO) {
         val trimmed = callUuid.trim()
         if (trimmed.isEmpty()) return@withContext false
         runCatching {
-            when (val endpoint = configuredEndpoint()) {
+            when (val endpoint = configuredEndpoint(expectedRevision)) {
                 is EndpointCheck.Rejected -> false
                 is EndpointCheck.Accepted -> {
                     ensureCapable(endpoint)?.let { return@withContext false }
@@ -169,13 +219,13 @@ class BlueBubblesClient(
      * `GET /api/v1/handle/availability/facetime?address=` advisory check (`facetimeRouter.ts` @ `76d2b2e`).
      * Never blocks generic `POST /api/v1/facetime/session`.
      */
-    suspend fun checkFaceTimeAvailability(address: String): FaceTimeAvailabilityResult = withContext(Dispatchers.IO) {
+    suspend fun checkFaceTimeAvailability(address: String, expectedRevision: Long? = null): FaceTimeAvailabilityResult = withContext(Dispatchers.IO) {
         val trimmed = address.trim()
         if (trimmed.isEmpty() || UrlRouter.wholeFaceTimeUrl(trimmed) != null) {
             return@withContext FaceTimeAvailabilityResult.Indeterminate
         }
         runCatching {
-            when (val endpoint = configuredEndpoint()) {
+            when (val endpoint = configuredEndpoint(expectedRevision)) {
                 is EndpointCheck.Rejected -> FaceTimeAvailabilityResult.Indeterminate
                 is EndpointCheck.Accepted -> {
                     val encoded = URLEncoder.encode(trimmed, Charsets.UTF_8.name())
@@ -194,7 +244,7 @@ class BlueBubblesClient(
         )
     }
 
-    /** `POST /api/v1/fcm/device` — registers a push token or UnifiedPush endpoint with BlueBubbles. */
+    /** `POST /api/v1/fcm/device` registers a Firebase device identifier. */
     suspend fun registerPushDevice(deviceName: String, identifier: String): Boolean = withContext(Dispatchers.IO) {
         val cleanName = deviceName.trim()
         val cleanId = identifier.trim()
@@ -225,9 +275,9 @@ class BlueBubblesClient(
      * contacts). One entry per person, phone preferred over email. Failures
      * return reachable=false so the UI can show an explicit offline state.
      */
-    suspend fun fetchContacts(): ServerContacts = withContext(Dispatchers.IO) {
+    suspend fun fetchContacts(expectedRevision: Long? = null): ServerContacts = withContext(Dispatchers.IO) {
         runCatching {
-            when (val endpoint = configuredEndpoint()) {
+            when (val endpoint = configuredEndpoint(expectedRevision)) {
                 is EndpointCheck.Rejected -> ServerContacts(emptyList(), reachable = false, failure = endpoint.failure)
                 is EndpointCheck.Accepted -> {
                     val response = execute(client, endpoint, BlueBubblesRoutes.CONTACTS, "GET", null)
@@ -271,21 +321,13 @@ class BlueBubblesClient(
     }
 
     private suspend fun ensureCapable(endpoint: EndpointCheck.Accepted): ServerFailure? {
-        val existing = synchronized(lock) {
-            if (cachedStatusRevision == endpoint.revision && cachedStatusUrl == endpoint.url.toString()) {
-                cachedStatus
-            } else null
-        }
+        val url = endpoint.url.toString()
+        val existing = completedStatus.value?.takeIf { it.revision == endpoint.revision && it.url == url }?.capability
         if (existing != null) return ServerCapability.verifyFaceTimeCapability(existing)
-        return ServerCapability.verifyFaceTimeCapability(checkServerStatus())
-    }
-
-    private fun cacheStatus(endpoint: EndpointCheck.Accepted, status: BlueBubblesServerStatus) {
-        synchronized(lock) {
-            cachedStatusRevision = endpoint.revision
-            cachedStatusUrl = endpoint.url.toString()
-            cachedStatus = status
-        }
+        val observation = observeServerStatus(endpoint.revision, url, statusRequests.incrementAndGet()) {
+            readServerStatus(endpoint)
+        } ?: return ServerFailure.ConnectionChanged
+        return ServerCapability.verifyFaceTimeCapability(observation.capability ?: observation.status)
     }
 
     private fun parseSessionLinkResponse(response: RawHttpResponse): FaceTimeSessionResult {
@@ -316,8 +358,11 @@ class BlueBubblesClient(
         data class Rejected(val failure: ServerFailure) : EndpointCheck()
     }
 
-    private fun configuredEndpoint(): EndpointCheck {
-        val configuration = endpointProvider()
+    private fun configuredEndpoint(expectedRevision: Long? = null, snapshot: EndpointSnapshot? = null): EndpointCheck {
+        val configuration = snapshot ?: endpointProvider()
+        if (expectedRevision != null && configuration.revision != expectedRevision) {
+            return EndpointCheck.Rejected(ServerFailure.ConnectionChanged)
+        }
         val password = when (val stored = configuration.password) {
             PasswordRead.Missing -> return EndpointCheck.Rejected(ServerFailure.PasswordMissing)
             is PasswordRead.Unavailable -> return EndpointCheck.Rejected(ServerFailure.CredentialsUnavailable)

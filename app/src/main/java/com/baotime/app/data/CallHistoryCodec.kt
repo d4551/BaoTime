@@ -44,8 +44,9 @@ object CallHistoryCodec {
                 throw JSONException("record timestamp is negative")
             }
             val callType = obj.getInt("callType")
-            if (callType !in BaoCallRecord.CALL_TYPE_MIN..BaoCallRecord.CALL_TYPE_MAX) {
-                throw JSONException("record callType is outside the contract")
+            when (callType) {
+                BaoCallRecord.TYPE_INCOMING, BaoCallRecord.TYPE_OUTGOING, BaoCallRecord.TYPE_MISSED -> Unit
+                else -> throw JSONException("record callType is outside the contract")
             }
             val displayName = obj.getString("displayName")
             if (displayName.isBlank()) {

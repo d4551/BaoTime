@@ -1,16 +1,18 @@
 package com.baotime.app.ui
 
-import android.util.TypedValue
+import android.content.Context
+import android.graphics.Insets
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
-import com.baotime.app.ui.components.ForegroundSurface
+import android.widget.ScrollView
 import com.baotime.app.R
 import com.baotime.app.ui.components.BaoTimeComponents
+import com.baotime.app.ui.components.ForegroundSurface
+import com.baotime.app.ui.components.WindowSafeArea
 import com.baotime.app.ui.theme.BaoTimeTheme
+import kotlin.math.ceil
 
 /**
  * The incoming-call surface: caller identity with Accept and Decline controls.
@@ -18,6 +20,13 @@ import com.baotime.app.ui.theme.BaoTimeTheme
  * link can never switch on the camera or microphone by itself.
  */
 object IncomingCallUi {
+    private class IncomingFrame(context: Context) : FrameLayout(context) {
+        lateinit var updateAppearance: (BaoTimeTheme) -> Unit
+    }
+
+    internal fun updateTheme(root: FrameLayout, theme: BaoTimeTheme) {
+        if (root is IncomingFrame) root.updateAppearance(theme)
+    }
 
     fun build(
         theme: BaoTimeTheme,
@@ -26,47 +35,49 @@ object IncomingCallUi {
         onDecline: () -> Unit
     ): FrameLayout {
         val context = theme.context
-        return FrameLayout(context).apply {
+        var currentTheme = theme
+        var navigationInsets = Insets.NONE
+        val root = IncomingFrame(context).apply {
             setBackgroundColor(theme.colorCallChrome)
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
+        }
+        root.apply {
             val column = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 val pad = theme.spaceXl
                 setPadding(pad, pad, pad, pad)
-                layoutParams = FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    Gravity.CENTER
-                )
             }
-            column.addView(
-                BaoTimeComponents.badgeView(theme, caller.trim().firstOrNull()?.uppercaseChar()?.toString().orEmpty())
-            )
-            column.addView(
-                BaoTimeComponents.titleText(theme, caller).apply {
-                    setTextColor(theme.colorCallText)
-                    setTextSize(TypedValue.COMPLEX_UNIT_PX, theme.textSizeTitlePx)
-                    gravity = Gravity.CENTER
-                }
-            )
-            column.addView(
-                BaoTimeComponents.captionText(theme, context.getString(R.string.incoming_call_title)).apply {
-                    setTextColor(theme.colorCallTextSecondary)
-                    gravity = Gravity.CENTER
-                    setPadding(0, theme.spaceSm, 0, 0)
-                }
-            )
+            val badge = BaoTimeComponents.badgeView(theme, caller.trim().firstOrNull()?.uppercaseChar()?.toString().orEmpty())
+            column.addView(badge)
+            val heading = BaoTimeComponents.titleText(theme, caller).apply {
+                BaoTimeComponents.styleTitle(theme, this, theme.colorCallText, theme.textSizeTitlePx)
+                gravity = Gravity.CENTER
+            }
+            column.addView(heading)
+            val caption = BaoTimeComponents.captionText(theme, context.getString(R.string.incoming_call_title)).apply {
+                BaoTimeComponents.styleCaption(theme, this, theme.colorCallTextSecondary)
+                gravity = Gravity.CENTER
+                setPadding(0, theme.spaceSm, 0, 0)
+            }
+            column.addView(caption)
+            val decline = BaoTimeComponents.callControlButton(
+                theme, R.drawable.ic_call_end, R.string.action_decline, R.string.desc_decline_call,
+                bgColor = theme.colorDanger, captionColor = theme.colorCallText, iconTint = theme.colorOnAccent
+            ) { onDecline() }
+            val accept = BaoTimeComponents.callControlButton(
+                theme, R.drawable.ic_call_accept, R.string.action_accept, R.string.desc_accept_call,
+                bgColor = theme.colorBaoGreen, captionColor = theme.colorCallText, iconTint = theme.colorOnAccent
+            ) { onAccept() }
+            val buttons = listOf(decline, accept)
             val controls = object : LinearLayout(context) {
                 override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
                     val available = MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight
-                    val required = (0 until childCount).sumOf { index ->
-                        val button = getChildAt(index)
-                        require(button is android.widget.Button)
-                        maxOf(button.minimumWidth, kotlin.math.ceil(button.paint.measureText(button.text.toString())).toInt() +
+                    val required = buttons.sumOf { button ->
+                        maxOf(button.minimumWidth, ceil(button.paint.measureText(button.text.toString())).toInt() +
                             button.paddingLeft + button.paddingRight) + theme.spaceMd * 2
                     }
                     val direction = if (available > 0 && required > available) VERTICAL else HORIZONTAL
@@ -79,37 +90,36 @@ object IncomingCallUi {
                 setPadding(0, theme.spaceXl, 0, 0)
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             }
-            controls.addView(
-                BaoTimeComponents.callControlButton(
-                    theme,
-                    R.drawable.ic_call_end,
-                    R.string.action_decline,
-                    R.string.desc_decline_call,
-                    bgColor = theme.colorDanger,
-                    captionColor = theme.colorCallText,
-                    iconTint = theme.colorOnAccent
-                ) { onDecline() }
-            )
-            controls.addView(
-                BaoTimeComponents.callControlButton(
-                    theme,
-                    R.drawable.ic_call_accept,
-                    R.string.action_accept,
-                    R.string.desc_accept_call,
-                    bgColor = theme.colorBaoGreen,
-                    captionColor = theme.colorCallText,
-                    iconTint = theme.colorOnAccent
-                ) { onAccept() }
-            )
+            buttons.forEach(controls::addView)
             column.addView(controls)
-            addView(column)
-            ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
-                val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-                view.background = theme.callSurfaceDrawable(insets.getInsets(WindowInsetsCompat.Type.navigationBars()), view.layoutDirection)
-                view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
-                insets
+            val scroll = ScrollView(context).apply {
+                isFillViewport = true
+                addView(column, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT))
             }
-            ForegroundSurface.bind(this, column, caller, lightStatusBars = false, lightNavigationBars = false)
+            addView(scroll, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT))
+            WindowSafeArea.observe(this) { view, safe, navigation ->
+                navigationInsets = navigation
+                view.background = currentTheme.callSurfaceDrawable(navigation.left, navigation.right, navigation.bottom,
+                    view.layoutDirection)
+                view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
+            }
+            ForegroundSurface.bind(this, column, caller, lightStatusBars = false, lightNavigationBars = false,
+                systemBarColor = theme.colorCallChrome)
+            updateAppearance = { updated ->
+                currentTheme = updated
+                root.background = updated.callSurfaceDrawable(navigationInsets.left, navigationInsets.right,
+                    navigationInsets.bottom, root.layoutDirection)
+                BaoTimeComponents.styleCaption(updated, badge)
+                BaoTimeComponents.styleTitle(updated, heading, updated.colorCallText, updated.textSizeTitlePx)
+                BaoTimeComponents.styleCaption(updated, caption, updated.colorCallTextSecondary)
+                BaoTimeComponents.styleCallControl(updated, decline, R.drawable.ic_call_end, updated.colorDanger,
+                    updated.colorCallText, updated.colorOnAccent)
+                BaoTimeComponents.styleCallControl(updated, accept, R.drawable.ic_call_accept, updated.colorBaoGreen,
+                    updated.colorCallText, updated.colorOnAccent)
+            }
         }
+        return root
     }
 }

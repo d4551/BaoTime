@@ -3,6 +3,7 @@
 
     <!-- Network & WebRTC media -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
@@ -28,6 +29,10 @@
             <data android:scheme="https" />
         </intent>
         <intent>
+            <action android:name="android.intent.action.DIAL" />
+            <data android:scheme="tel" />
+        </intent>
+        <intent>
             <action android:name="org.unifiedpush.android.distributor.REGISTER" />
         </intent>
     </queries>
@@ -50,7 +55,7 @@
             android:launchMode="singleTask"
             android:supportsPictureInPicture="true"
             android:resizeableActivity="true"
-            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden|uiMode|fontScale"
             android:windowSoftInputMode="adjustResize">
 
             <intent-filter>
@@ -59,15 +64,6 @@
             </intent-filter>
 
             <!-- Native FaceTime Web Link Interceptor (BlueBubbles & Beeper) -->
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" />
-                <data android:host="facetime.apple.com" />
-                <data android:pathPrefix="/join" />
-            </intent-filter>
-
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -112,11 +108,9 @@
             </intent-filter>
         </service>
 
-        <!-- Clean-room UnifiedPush / push receiver for FaceTime call invitations (Task 11) -->
         <receiver
             android:name=".call.IncomingPushReceiver"
-            android:exported="true"
-            android:permission="android.permission.INTERNET">
+            android:exported="true">
             <intent-filter>
                 <action android:name="org.unifiedpush.android.connector.MESSAGE" />
                 <action android:name="org.unifiedpush.android.connector.NEW_ENDPOINT" />

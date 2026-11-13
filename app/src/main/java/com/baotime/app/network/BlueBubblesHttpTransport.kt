@@ -48,6 +48,8 @@ internal object BlueBubblesHttpTransport {
 
                 override fun onResponse(call: Call, response: Response) {
                     response.use { res ->
+                        // Every failure resumes the caller's coroutine; throwing here would
+                        // crash OkHttp's dispatcher thread instead of the typed client path.
                         runCatching { res.body.string() }.fold(
                             onSuccess = {
                                 if (!continuation.isCompleted) {
@@ -55,11 +57,7 @@ internal object BlueBubblesHttpTransport {
                                 }
                             },
                             onFailure = {
-                                if (it is IOException) {
-                                    if (!continuation.isCompleted) continuation.resumeWithException(it)
-                                } else {
-                                    throw it
-                                }
+                                if (!continuation.isCompleted) continuation.resumeWithException(it)
                             }
                         )
                     }

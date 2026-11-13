@@ -9,6 +9,7 @@ import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.RippleDrawable
 import android.graphics.drawable.StateListDrawable
 import android.view.Gravity
+import android.view.View
 import androidx.core.graphics.ColorUtils
 import androidx.core.graphics.Insets
 import com.baotime.app.R
@@ -16,12 +17,10 @@ import com.baotime.app.R
 /** Canonical resolved colors, pixel typography, shapes and control states. */
 class BaoTimeTheme(val context: Context) {
     val colorBg = context.getColor(R.color.color_bg)
-    val colorBgTop = context.getColor(R.color.color_bg_top)
     val colorSurface = context.getColor(R.color.color_surface)
     val colorSurfaceHigh = context.getColor(R.color.color_surface_high)
     val colorStroke = context.getColor(R.color.color_stroke)
     val colorBaoGreen = context.getColor(R.color.bao_green)
-    val colorBaoGreenDark = context.getColor(R.color.bao_green_dark)
     val colorOnAccent = context.getColor(R.color.color_on_accent)
     val colorCallText = context.getColor(R.color.color_call_text)
     val colorCallTextSecondary = context.getColor(R.color.color_call_text_secondary)
@@ -46,7 +45,6 @@ class BaoTimeTheme(val context: Context) {
     private val colorRipple = context.getColor(R.color.color_control_ripple)
 
     val textSizeTitlePx = context.resources.getDimension(R.dimen.text_size_title)
-    val textSizeHeadingPx = context.resources.getDimension(R.dimen.text_size_heading)
     val textSizeBodyPx = context.resources.getDimension(R.dimen.text_size_body)
     val textSizeControlPx = context.resources.getDimension(R.dimen.text_size_control)
     val textSizeCaptionPx = context.resources.getDimension(R.dimen.text_size_caption)
@@ -131,12 +129,15 @@ class BaoTimeTheme(val context: Context) {
     }
 
     /** Native navigation retains its system-theme appearance over a matching inset surface. */
-    fun callSurfaceDrawable(navigation: Insets, layoutDirection: Int): Drawable {
-        val rtl = layoutDirection == android.view.View.LAYOUT_DIRECTION_RTL
-        val start = if (rtl) navigation.right else navigation.left
-        val end = if (rtl) navigation.left else navigation.right
-        val edges = listOf(Gravity.BOTTOM to navigation.bottom, Gravity.START to start,
-            Gravity.END to end).filter { it.second > 0 }
+    fun callSurfaceDrawable(navigation: Insets, layoutDirection: Int): Drawable =
+        callSurfaceDrawable(navigation.left, navigation.right, navigation.bottom, layoutDirection)
+
+    internal fun callSurfaceDrawable(left: Int, right: Int, bottom: Int, layoutDirection: Int): Drawable {
+        val rtl = layoutDirection == View.LAYOUT_DIRECTION_RTL
+        val start = if (rtl) right else left
+        val end = if (rtl) left else right
+        val edges = listOf(Gravity.BOTTOM to bottom, Gravity.START to start, Gravity.END to end)
+            .filter { it.second > 0 }
         val layers = listOf<Drawable>(surfaceDrawable(0, colorCallChrome)) +
             edges.map { surfaceDrawable(0, colorBg) }
         return LayerDrawable(layers.toTypedArray()).apply {

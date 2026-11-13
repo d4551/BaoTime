@@ -1,6 +1,7 @@
 package com.baotime.app.ui
 
-import android.util.TypedValue
+import android.app.Activity
+import android.graphics.Insets
 import android.view.Gravity
 import android.view.Menu
 import android.view.View
@@ -9,82 +10,107 @@ import android.webkit.WebView
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.PopupMenu
-import android.widget.TextView
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import com.baotime.app.R
 import com.baotime.app.audio.CallAudioRouter
 import com.baotime.app.ui.components.BaoTimeComponents
 import com.baotime.app.ui.components.ForegroundSurface
+import com.baotime.app.ui.components.GlassNavigation
+import com.baotime.app.ui.components.WindowSafeArea
 import com.baotime.app.ui.theme.BaoTimeTheme
 
 class CallOverlay(val rootView: FrameLayout, val webView: WebView, val room: FaceTimeWebViewHelper,
-    val topBar: View, val permissionButton: View, val statusText: TextView)
+    val topBar: View, val permissionButton: View, internal val updateTheme: (BaoTimeTheme) -> Unit)
 
 /** One compact app bar; Apple owns the entire room and its camera, mic and leave controls. */
 object CallOverlayUi {
-    fun build(theme: BaoTimeTheme, title: String, onStatusUpdate: (String) -> Unit,
+    fun build(theme: BaoTimeTheme, title: String,
         onAllowMedia: () -> Unit, speakerState: () -> CallAudioRouter.SpeakerState, onSpeakerToggle: () -> Unit,
         onShareLink: () -> Unit, onEnterPip: () -> Unit, onEndCall: () -> Unit,
+        onRendererGone: (WebView) -> Unit,
         onTopChanged: (Boolean) -> Unit
     ): CallOverlay {
         val context = theme.context
+        var currentTheme = theme
         val root = FrameLayout(context).apply { setBackgroundColor(theme.colorCallChrome) }
         val web = WebView(context)
-        root.addView(web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        root.addView(column, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         val toolbar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(theme.spaceSm, theme.spaceSm, theme.spaceSm, theme.spaceSm)
         }
-        toolbar.addView(BaoTimeComponents.iconActionButton(theme, BaoTimeComponents.RowAction(
-            R.drawable.ic_close, R.string.desc_end_call, iconTint = theme.colorCallText) { onEndCall() }))
+        val close = BaoTimeComponents.iconActionButton(theme, BaoTimeComponents.RowAction(
+            R.drawable.ic_close, R.string.desc_end_call, iconTint = theme.colorCallText) { onEndCall() })
+        toolbar.addView(close)
         val identity = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(theme.spaceMd, 0, theme.spaceMd, 0)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
-        identity.addView(BaoTimeComponents.titleText(theme, title).apply { setTextColor(theme.colorCallText) })
-        val status = TextView(context).apply {
-            setTextColor(theme.colorCallTextSecondary)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, theme.textSizeCaptionPx)
-            setText(R.string.call_status_connecting)
+        val heading = BaoTimeComponents.titleText(theme, title).apply {
+            BaoTimeComponents.styleTitle(theme, this, theme.colorCallText)
+        }
+        identity.addView(heading)
+        val status = BaoTimeComponents.captionText(theme, context.getString(R.string.call_status_connecting)).apply {
+            BaoTimeComponents.styleCaption(theme, this, theme.colorCallTextSecondary)
         }
         identity.addView(status)
         toolbar.addView(identity)
-        val more = BaoTimeComponents.iconActionButton(theme, BaoTimeComponents.RowAction(
-            R.drawable.ic_more, R.string.call_more_actions, iconTint = theme.colorCallText) { anchor ->
-            showOptions(theme, anchor, web, speakerState, onSpeakerToggle, onShareLink, onEnterPip)
-        })
-        toolbar.addView(more)
-        root.addView(toolbar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
-        com.baotime.app.ui.components.GlassNavigation(theme, web, toolbar,
-            tintColor = theme.colorGlassCallBar, fallbackColor = theme.colorCallChrome,
-            radius = 0, interactive = false)
         val permission = BaoTimeComponents.actionButton(theme, context.getString(R.string.action_allow)) { onAllowMedia() }
         permission.visibility = View.GONE
-        root.addView(permission, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP).apply {
+        val room = FaceTimeWebViewHelper(web, { resource ->
+            val message = context.getString(resource)
+            if (status.text != message) status.text = message
+        }, { waiting ->
+            val pip = context is Activity && context.isInPictureInPictureMode
+            permission.visibility = if (waiting && !pip) View.VISIBLE else View.GONE
+        }, onRendererGone)
+        val more = BaoTimeComponents.iconActionButton(theme, BaoTimeComponents.RowAction(
+            R.drawable.ic_more, R.string.call_more_actions, iconTint = theme.colorCallText) { anchor ->
+            showOptions(currentTheme, anchor, room, speakerState, onSpeakerToggle, onShareLink, onEnterPip)
+        })
+        toolbar.addView(more)
+        column.addView(toolbar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT))
+        val glass = GlassNavigation(theme, web, toolbar,
+            tintColor = theme.colorGlassCallBar, fallbackColor = theme.colorCallChrome,
+            radius = 0, interactive = false)
+        glass.sampleTopEdge()
+        column.addView(permission, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 marginStart = theme.spaceSm
                 marginEnd = theme.spaceSm
-                topMargin = theme.minTouchTarget + theme.spaceSm * 2
+                topMargin = theme.spaceSm
+                bottomMargin = theme.spaceSm
             })
-        val room = FaceTimeWebViewHelper(web, { resource -> onStatusUpdate(context.getString(resource)) }, { waiting ->
-            val pip = context is android.app.Activity && context.isInPictureInPictureMode
-            permission.visibility = if (waiting && !pip) View.VISIBLE else View.GONE
-        })
-        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
-            val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime())
-            view.background = theme.callSurfaceDrawable(insets.getInsets(WindowInsetsCompat.Type.navigationBars()), view.layoutDirection)
+        column.addView(web, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        var lastNavigation = Insets.NONE
+        WindowSafeArea.observe(root, includeKeyboard = true) { view, safe, navigation ->
+            lastNavigation = navigation
+            view.background = currentTheme.callSurfaceDrawable(navigation.left, navigation.right, navigation.bottom,
+                view.layoutDirection)
             view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
-            insets
         }
         ForegroundSurface.bind(root, status, title, lightStatusBars = false,
-            lightNavigationBars = false, onTopChanged = onTopChanged)
-        return CallOverlay(root, web, room, toolbar, permission, status)
+            lightNavigationBars = false, systemBarColor = theme.colorCallChrome) { top ->
+            status.accessibilityLiveRegion = if (top) View.ACCESSIBILITY_LIVE_REGION_POLITE else View.ACCESSIBILITY_LIVE_REGION_NONE
+            onTopChanged(top)
+        }
+        return CallOverlay(root, web, room, toolbar, permission) { updated ->
+            currentTheme = updated
+            BaoTimeComponents.styleTitle(updated, heading, updated.colorCallText)
+            BaoTimeComponents.styleCaption(updated, status, updated.colorCallTextSecondary)
+            for (button in listOf(close, more)) {
+                BaoTimeComponents.styleIconAction(updated, button, updated.colorControlClear, updated.colorCallText)
+            }
+            BaoTimeComponents.styleActionButton(updated, permission)
+            glass.updateMaterial(updated, updated.colorGlassCallBar, updated.colorCallChrome)
+            root.background = updated.callSurfaceDrawable(lastNavigation.left, lastNavigation.right,
+                lastNavigation.bottom, root.layoutDirection)
+        }
     }
-    private fun showOptions(theme: BaoTimeTheme, anchor: View, web: WebView,
+    private fun showOptions(theme: BaoTimeTheme, anchor: View, room: FaceTimeWebViewHelper,
         speakerState: () -> CallAudioRouter.SpeakerState, onSpeakerToggle: () -> Unit,
         onShareLink: () -> Unit, onEnterPip: () -> Unit
     ) {
@@ -99,12 +125,19 @@ object CallOverlayUi {
             }
             menu.add(Menu.NONE, R.id.room_pip, 2, R.string.desc_pip)
             menu.add(Menu.NONE, R.id.room_reload, 3, R.string.desc_retry_call)
+            val attachment = object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(view: View) = Unit
+                override fun onViewDetachedFromWindow(view: View) = dismiss()
+            }
+            anchor.addOnAttachStateChangeListener(attachment)
+            setOnDismissListener { anchor.removeOnAttachStateChangeListener(attachment) }
             setOnMenuItemClickListener { item ->
+                if (!anchor.isAttachedToWindow) return@setOnMenuItemClickListener false
                 when (item.itemId) {
                     R.id.room_share -> onShareLink()
                     R.id.room_speaker -> onSpeakerToggle()
                     R.id.room_pip -> onEnterPip()
-                    R.id.room_reload -> web.reload()
+                    R.id.room_reload -> room.reloadRoom()
                     else -> return@setOnMenuItemClickListener false
                 }
                 true
@@ -112,5 +145,4 @@ object CallOverlayUi {
             show()
         }
     }
-
 }

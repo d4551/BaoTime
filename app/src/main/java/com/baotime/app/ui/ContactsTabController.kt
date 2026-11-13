@@ -1,30 +1,36 @@
 package com.baotime.app.ui
 
-import android.view.View
-import android.view.ViewGroup
-import android.widget.EditText
+import android.text.InputType
 import android.widget.LinearLayout
 import androidx.core.view.doOnDetach
 import androidx.core.widget.doAfterTextChanged
 import com.baotime.app.R
 import com.baotime.app.config.AppConfig
 import com.baotime.app.data.ContactsCache
+import com.baotime.app.data.ContactsOutcome
 import com.baotime.app.data.ContactsSnapshot
 import com.baotime.app.data.DeviceContact
+import com.baotime.app.data.MacContactsState
 import com.baotime.app.ui.components.BaoTimeComponents
 import com.baotime.app.ui.theme.BaoTimeTheme
 
 /** Owns the Contacts tab's query, expansion and transient view lifecycle. */
 class ContactsTabController(
-    private val theme: BaoTimeTheme,
+    theme: BaoTimeTheme,
     private val config: AppConfig,
     private val cache: ContactsCache,
-    private val launch: (suspend () -> Unit) -> Unit,
-    private val onOpenActions: (DeviceContact) -> Unit
+    private val onOpenActions: (DeviceContact, Long?) -> Unit
 ) {
+    private var theme = theme
     private var query = ""
     private var expanded = false
     private var current: Tab? = null
+    private var selection: Pair<Int, Int>? = null
+    val isShowing: Boolean get() = current != null
+
+    internal fun updateTheme(theme: BaoTimeTheme) {
+        this.theme = theme
+    }
 
     fun show(container: LinearLayout) {
         val tab = Tab()
@@ -32,31 +38,38 @@ class ContactsTabController(
         container.addView(tab.root)
         tab.root.doOnDetach {
             tab.search.removeCallbacks(tab.debounce)
-            if (current === tab) current = null
+            if (current === tab) {
+                selection = tab.search.selectionStart to tab.search.selectionEnd
+                current = null
+            }
         }
-        val existing = cache.snapshot
-        if (existing != null) tab.render(existing, true)
-        else tab.sections.addView(ContactsTabUi.loadingNote(theme))
-        launch {
-            val fresh = cache.refresh()
-            if (current === tab && tab.root.isAttachedToWindow) tab.render(fresh, true)
-        }
+        cache.snapshot?.let { tab.render(it, true) }
+    }
+
+    fun refresh(snapshot: ContactsSnapshot) {
+        current?.render(snapshot, true)
+    }
+
+    fun refreshFavorites() {
+        val snapshot = cache.snapshot ?: return
+        current?.render(snapshot, false)
     }
 
     private inner class Tab {
         val root = LinearLayout(theme.context).apply { orientation = LinearLayout.VERTICAL }
-        val sections = LinearLayout(theme.context).apply { orientation = LinearLayout.VERTICAL }
+        private val permissionRecovery = ContactsTabUi.PermissionRecovery(theme)
+        private val macStatus = ContactsTabUi.Status(theme)
+        private val empty = ContactsTabUi.Status(theme)
+        private val favorites = ContactsTabUi.Section(theme, R.string.contacts_favorites_header, onOpenActions, ::expand)
+        private val mac = ContactsTabUi.Section(theme, R.string.contacts_imessage_header, onOpenActions, ::expand)
+        private val device = ContactsTabUi.Section(theme, R.string.contacts_device_header, onOpenActions, ::expand)
         val debounce = Runnable { cache.snapshot?.let { render(it, false) } }
-        val search = EditText(theme.context).apply {
-            hint = context.getString(R.string.contacts_search_hint)
-            setTextColor(theme.colorTextPrimary)
-            setHintTextColor(theme.colorTextHint)
-            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, theme.textSizeBodyPx)
-            background = theme.fieldBackground()
-            setPadding(0, theme.spaceMd, 0, theme.spaceMd)
-            setSingleLine(true)
-            setText(query)
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        val search = BaoTimeComponents.textField(theme, R.string.contacts_search_hint, query,
+            InputType.TYPE_CLASS_TEXT).apply {
+            id = R.id.contacts_search
+            selection?.let { (start, end) ->
+                if (start >= 0 && end >= 0) setSelection(start.coerceAtMost(length()), end.coerceAtMost(length()))
+            }
             doAfterTextChanged { value ->
                 query = value.toString()
                 expanded = false
@@ -64,19 +77,42 @@ class ContactsTabController(
                 postDelayed(debounce, SEARCH_DEBOUNCE_MS)
             }
         }
+        private var displayed: ContactsSnapshot? = null
         init {
-            root.addView(BaoTimeComponents.captionText(theme, theme.context.getString(R.string.contacts_search_label)))
+            root.addView(BaoTimeComponents.fieldLabel(theme, R.string.contacts_search_label, search))
             root.addView(search)
-            root.addView(sections)
+            root.addView(favorites.root)
+            root.addView(macStatus.view)
+            root.addView(mac.root)
+            root.addView(device.root)
+            root.addView(empty.view)
+            root.addView(permissionRecovery.root)
+            macStatus.show(ContactsTabUi.macStatus(null))
+        }
+
+        private fun expand() {
+            expanded = true
+            cache.snapshot?.let { render(it, false) }
         }
 
         fun render(snapshot: ContactsSnapshot, animate: Boolean) {
             if (current !== this) return
-            sections.removeAllViews()
-            val favorites = snapshot.allContacts.filter { AppConfig.favoriteKey(it.primaryAddress) in config.favorites() }
-            ContactsTabUi.renderSections(theme, sections, snapshot.device, snapshot.iMessage,
-                snapshot.serverReachable, favorites, query, expanded, onOpenActions,
-                { expanded = true; render(snapshot, false) }, animate)
+            val latest = cache.current(snapshot)
+            if (animate && displayed == latest) return
+            displayed = latest
+            val denied = latest.device == ContactsOutcome.Denied
+            permissionRecovery.update(denied)
+            val matches = latest.search(query)
+            val favoriteKeys = config.favorites()
+            val favoriteMatches = matches.all.filter { AppConfig.favoriteKey(it.contact.primaryAddress) in favoriteKeys }
+            val animationStart = 0.takeIf { animate }
+            val favoritesCount = favorites.render(favoriteMatches, expanded, animationStart)
+            macStatus.show(ContactsTabUi.macStatus(latest.macState))
+            val macCount = mac.render(matches.iMessage, expanded, animationStart?.plus(favoritesCount))
+            device.render(matches.device, expanded, animationStart?.plus(favoritesCount + macCount))
+            val noMatches = !denied && latest.macState != MacContactsState.Loading && matches.all.isEmpty()
+            empty.show(ContactsTabUi.emptyStatus(query, deviceOnly = latest.macState == MacContactsState.Unavailable)
+                .takeIf { noMatches })
         }
     }
 

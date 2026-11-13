@@ -59,35 +59,44 @@ object IncomingFaceTimeParser {
      * Parses a `ft-call-status-changed` payload (either a [JSONObject] or JSON string).
      * Returns null if malformed or missing a non-blank `uuid` / `call_uuid`.
      */
-    fun parseCallStatusChanged(raw: Any?): IncomingFaceTimeEvent.CallStatusChanged? {
-        val obj = toJsonObject(raw) ?: return null
-        val uuid = obj.optNonBlankString("uuid")
-            ?: obj.optNonBlankString("call_uuid")
-            ?: return null
-        if (!obj.has("status_id") || obj.isNull("status_id")) return null
+    fun parseCallStatusChanged(raw: String?): IncomingFaceTimeEvent.CallStatusChanged? =
+        toJsonObject(raw)?.let(::parseCallStatusChanged)
+
+    fun parseCallStatusChanged(obj: JSONObject): IncomingFaceTimeEvent.CallStatusChanged? {
+        val uuid = obj.callUuid() ?: return null
         val statusId = obj.optInt("status_id", -1)
         if (statusId < 0) return null
-        val handleObj = obj.optJSONObject("handle")
+        return statusEvent(obj, uuid, statusId, obj.optNonBlankString("address"))
+    }
+
+    internal fun parseIncomingPush(obj: JSONObject): IncomingFaceTimeEvent? {
+        val uuid = obj.callUuid() ?: return parseLegacyIncoming(obj)
+        val statusId = obj.optInt("status_id", FaceTimeSessionStatus.INCOMING.id)
         val address = obj.optNonBlankString("address")
-            ?: handleObj?.optNonBlankString("address")
-        val isAudio = obj.optBoolean("is_audio", false)
-        val isVideo = obj.optBoolean("is_video", true)
-        return IncomingFaceTimeEvent.CallStatusChanged(
+            ?: obj.optNonBlankString("caller")
+        return statusEvent(obj, uuid, statusId, address)
+    }
+
+    private fun JSONObject.callUuid(): String? = optNonBlankString("uuid") ?: optNonBlankString("call_uuid")
+
+    private fun statusEvent(obj: JSONObject, uuid: String, statusId: Int, address: String?) =
+        IncomingFaceTimeEvent.CallStatusChanged(
             uuid = uuid,
             status = FaceTimeSessionStatus.fromId(statusId),
             statusId = statusId,
-            address = address,
-            isAudio = isAudio,
-            isVideo = isVideo
+            address = address ?: obj.optJSONObject("handle")?.optNonBlankString("address"),
+            isAudio = obj.optBoolean("is_audio", false),
+            isVideo = obj.optBoolean("is_video", true)
         )
-    }
 
     /**
      * Parses a legacy `incoming-facetime` payload (JSON string `{"caller":"...","timestamp":...}`
      * or [JSONObject]). Never fabricates a `uuid`.
      */
-    fun parseLegacyIncoming(raw: Any?): IncomingFaceTimeEvent.LegacyIncoming? {
-        val obj = toJsonObject(raw) ?: return null
+    fun parseLegacyIncoming(raw: String?): IncomingFaceTimeEvent.LegacyIncoming? =
+        toJsonObject(raw)?.let(::parseLegacyIncoming)
+
+    fun parseLegacyIncoming(obj: JSONObject): IncomingFaceTimeEvent.LegacyIncoming? {
         val caller = obj.optNonBlankString("caller")
             ?: obj.optNonBlankString("address")
         val timestamp = if (obj.has("timestamp") && !obj.isNull("timestamp")) {
@@ -102,24 +111,16 @@ object IncomingFaceTimeParser {
         )
     }
 
-    internal fun toJsonObject(raw: Any?): JSONObject? = when (raw) {
-        is JSONObject -> raw
-        is String -> {
-            val trimmed = raw.trim()
-            if (trimmed.isEmpty()) null
-            else if (trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
-                runCatching {
-                    val unquoted = JSONObject("{\"v\":$trimmed}").optString("v").trim()
-                    if (unquoted.startsWith("{") && unquoted.endsWith("}")) JSONObject(unquoted) else null
-                }.fold(onSuccess = { it }, onFailure = { if (it is JSONException) null else throw it })
-            } else if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-                runCatching { JSONObject(trimmed) }
-                    .fold(onSuccess = { it }, onFailure = { if (it is JSONException) null else throw it })
-            } else {
-                null
-            }
+    internal fun toJsonObject(raw: String?): JSONObject? {
+        val trimmed = raw?.trim() ?: return null
+        return try {
+            val decoded = if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+                JSONObject("{\"v\":$trimmed}").optString("v").trim()
+            } else trimmed
+            if (decoded.startsWith('{') && decoded.endsWith('}')) JSONObject(decoded) else null
+        } catch (_: JSONException) {
+            null
         }
-        else -> null
     }
 
     internal fun JSONObject.optNonBlankString(key: String): String? {

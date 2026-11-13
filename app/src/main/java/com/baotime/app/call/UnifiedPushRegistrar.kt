@@ -1,11 +1,15 @@
 package com.baotime.app.call
 
+import android.app.BroadcastOptions
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.edit
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import java.net.URI
+import java.net.URISyntaxException
 import java.util.UUID
 
 /** Storage contract for UnifiedPush connector registration state (`Task 11`). */
@@ -24,18 +28,53 @@ interface PushRegistrationStore {
 class SharedPreferencesPushStore(context: Context) : PushRegistrationStore {
 
     private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    private val lock = Any()
+    private val endpoint = MutableStateFlow(currentEndpoint() != null)
+    internal val endpointAvailable = endpoint.asStateFlow()
+
+    internal data class Binding(val distributor: String, val token: String)
+
+    internal data class BindingChange(val current: Binding?, val previous: Binding?)
+
+    internal fun bind(macGeneration: Long, distributor: String?): BindingChange = synchronized(prefs) {
+        val previous = currentDistributor()?.let { packageName -> currentToken()?.let { Binding(packageName, it) } }
+        if (distributor != null && distributor == previous?.distributor && isCurrentMac(macGeneration)) {
+            return@synchronized BindingChange(previous, null)
+        }
+        val current = distributor?.let { Binding(it, UUID.randomUUID().toString()) }
+        prefs.edit {
+            remove(KEY_ENDPOINT)
+            putLong(KEY_MAC_GENERATION, macGeneration)
+            putString(KEY_INSTANCE_TOKEN, current?.token)
+            putString(KEY_DISTRIBUTOR_PACKAGE, current?.distributor)
+        }
+        endpoint.value = false
+        BindingChange(current, previous)
+    }
+
+    internal fun handleBoundCallback(macGeneration: Long, token: String?, handle: () -> Unit) = synchronized(prefs) {
+        if (isCurrentMac(macGeneration) && currentDistributor() == UnifiedPushRegistrar.NTFY_PACKAGE &&
+            UnifiedPushRegistrar.acceptsConnectorToken(currentToken(), token)) handle()
+    }
+
+    internal fun boundEndpoint(macGeneration: Long): String? = synchronized(prefs) {
+        if (!isCurrentMac(macGeneration) || currentDistributor() != UnifiedPushRegistrar.NTFY_PACKAGE || currentToken() == null) {
+            return@synchronized null
+        }
+        currentEndpoint()?.takeIf(UnifiedPushRegistrar::isNtfyEndpoint)
+    }
+
+    private fun isCurrentMac(macGeneration: Long): Boolean = prefs.getLong(KEY_MAC_GENERATION, -1L) == macGeneration
 
     override fun currentToken(): String? =
         prefs.getString(KEY_INSTANCE_TOKEN, null)?.trim()?.takeIf { it.isNotEmpty() }
 
-    override fun getOrCreateToken(): String = synchronized(lock) {
+    override fun getOrCreateToken(): String = synchronized(prefs) {
         currentToken() ?: UUID.randomUUID().toString().also { generated ->
             prefs.edit { putString(KEY_INSTANCE_TOKEN, generated) }
         }
     }
 
-    override fun adoptTokenIfAbsent(token: String) = synchronized(lock) {
+    override fun adoptTokenIfAbsent(token: String) = synchronized(prefs) {
         val clean = token.trim()
         if (clean.isNotEmpty() && currentToken() == null) {
             prefs.edit { putString(KEY_INSTANCE_TOKEN, clean) }
@@ -48,11 +87,20 @@ class SharedPreferencesPushStore(context: Context) : PushRegistrationStore {
     override fun saveEndpoint(endpoint: String) {
         val clean = endpoint.trim()
         if (clean.isEmpty()) return
-        prefs.edit { putString(KEY_ENDPOINT, clean) }
+        synchronized(prefs) {
+            prefs.edit { putString(KEY_ENDPOINT, clean) }
+            this.endpoint.value = UnifiedPushRegistrar.isNtfyEndpoint(clean)
+        }
     }
 
     override fun clearEndpoint() {
-        prefs.edit { remove(KEY_ENDPOINT) }
+        synchronized(prefs) {
+            prefs.edit {
+                remove(KEY_INSTANCE_TOKEN)
+                remove(KEY_ENDPOINT)
+            }
+            endpoint.value = false
+        }
     }
 
     override fun currentDistributor(): String? =
@@ -69,26 +117,19 @@ class SharedPreferencesPushStore(context: Context) : PushRegistrationStore {
         const val PREFS_NAME = "baotime_push"
         private const val KEY_INSTANCE_TOKEN = "instance_token"
         private const val KEY_ENDPOINT = "endpoint"
+        private const val KEY_MAC_GENERATION = "mac_generation"
         private const val KEY_DISTRIBUTOR_PACKAGE = "distributor_package"
     }
 }
 
-/**
- * Clean-room UnifiedPush v2.1 distributor discovery, registration broadcast, and endpoint state owner.
- *
- * Discovers installed distributors handling [ACTION_REGISTER], sends a verified registration
- * broadcast carrying an immutable [EXTRA_PI] `PendingIntent`, and persists delivered endpoints
- * so saving/changing BlueBubbles credentials re-registers the active push endpoint cleanly.
- */
+/** Registers the phone's current Mac binding with the ntfy UnifiedPush distributor. */
 object UnifiedPushRegistrar {
 
+    internal const val NTFY_PACKAGE = "io.heckel.ntfy"
     const val ACTION_REGISTER = "org.unifiedpush.android.distributor.REGISTER"
-    const val ACTION_UNREGISTER = "org.unifiedpush.android.distributor.UNREGISTER"
+    private const val ACTION_UNREGISTER = "org.unifiedpush.android.distributor.UNREGISTER"
     const val EXTRA_TOKEN = "token"
-    const val EXTRA_APPLICATION = "application"
     const val EXTRA_PI = "pi"
-    const val EXTRA_FEATURES = "features"
-    const val FEATURE_BYTES_MESSAGE = "BYTES_MESSAGE"
 
     /** Validates an optional incoming broadcast `token` against the stored connector token. */
     fun acceptsToken(storedToken: String?, incomingToken: String?): Boolean {
@@ -96,6 +137,10 @@ object UnifiedPushRegistrar {
         val cleanStored = storedToken?.trim().orEmpty()
         return cleanIncoming.isEmpty() || cleanStored.isEmpty() || cleanIncoming == cleanStored
     }
+
+    /** Exported connector actions require the token generated before sending REGISTER. */
+    fun acceptsConnectorToken(storedToken: String?, incomingToken: String?): Boolean =
+        !storedToken.isNullOrBlank() && incomingToken == storedToken
 
     /** Chooses a distributor package from resolved broadcast receivers, preferring an existing binding. */
     fun selectDistributor(
@@ -131,44 +176,37 @@ object UnifiedPushRegistrar {
         return true
     }
 
-    /** Discovers an installed UnifiedPush distributor and sends `REGISTER` if one is present. */
-    fun registerWithDistributorIfAvailable(context: Context, store: PushRegistrationStore): Boolean {
-        val query = Intent(ACTION_REGISTER)
-        val receivers = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.packageManager.queryBroadcastReceivers(
-                query,
-                PackageManager.ResolveInfoFlags.of(0)
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            context.packageManager.queryBroadcastReceivers(query, 0)
-        }
-        val candidates = receivers.mapNotNull { it.activityInfo?.packageName }
-        val distributor = selectDistributor(
-            candidates = candidates,
-            selfPackage = context.packageName,
-            preferredDistributor = store.currentDistributor()
-        )
-        if (distributor == null) {
-            store.saveDistributor(null)
+    internal fun isNtfyEndpoint(endpoint: String): Boolean {
+        val url = try {
+            URI(endpoint)
+        } catch (_: URISyntaxException) {
             return false
         }
-        val token = store.getOrCreateToken()
-        store.saveDistributor(distributor)
-        val verificationPi = PendingIntent.getBroadcast(
-            context,
-            0,
-            Intent(),
-            PendingIntent.FLAG_IMMUTABLE
-        )
-        val registerIntent = Intent(ACTION_REGISTER).apply {
-            setPackage(distributor)
-            putExtra(EXTRA_TOKEN, token)
-            putExtra(EXTRA_APPLICATION, context.packageName)
-            putStringArrayListExtra(EXTRA_FEATURES, arrayListOf(FEATURE_BYTES_MESSAGE))
-            putExtra(EXTRA_PI, verificationPi)
+        return url.scheme.equals("https", ignoreCase = true) && !url.host.isNullOrBlank() &&
+            url.rawUserInfo == null && url.rawFragment == null && !url.rawPath.isNullOrBlank() &&
+            url.rawPath != "/" && url.rawQuery == "up=1"
+    }
+
+    internal fun registerWithDistributorIfAvailable(context: Context, store: SharedPreferencesPushStore,
+        macGeneration: Long, macConfigured: Boolean) {
+        val distributor = if (macConfigured) {
+            val query = Intent(ACTION_REGISTER).setPackage(NTFY_PACKAGE)
+            context.packageManager.queryBroadcastReceivers(query, 0).firstOrNull()?.activityInfo?.packageName
+        } else null
+        val change = store.bind(macGeneration, distributor)
+        change.previous?.takeIf { it.distributor == NTFY_PACKAGE }?.let { send(context, ACTION_UNREGISTER, it) }
+        change.current?.let { send(context, ACTION_REGISTER, it) }
+    }
+
+    private fun send(context: Context, action: String, binding: SharedPreferencesPushStore.Binding) {
+        val intent = Intent(action).setPackage(binding.distributor).putExtra(EXTRA_TOKEN, binding.token)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            val options = BroadcastOptions.makeBasic().setShareIdentityEnabled(true)
+            context.sendBroadcast(intent, null, options.toBundle())
+        } else {
+            val verification = PendingIntent.getBroadcast(context, 0,
+                Intent(action).setPackage(context.packageName), PendingIntent.FLAG_IMMUTABLE)
+            context.sendBroadcast(intent.putExtra(EXTRA_PI, verification))
         }
-        context.sendBroadcast(registerIntent)
-        return true
     }
 }
