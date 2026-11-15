@@ -15,7 +15,6 @@ import com.baotime.app.call.CallSessionController
 import com.baotime.app.data.BaoCallRecord
 import com.baotime.app.data.CallHistory
 import com.baotime.app.ui.theme.BaoTimeTheme
-import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*

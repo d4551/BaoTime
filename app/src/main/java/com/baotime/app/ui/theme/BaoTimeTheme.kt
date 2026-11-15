@@ -21,6 +21,7 @@ class BaoTimeTheme(val context: Context) {
     val colorSurfaceHigh = context.getColor(R.color.color_surface_high)
     val colorStroke = context.getColor(R.color.color_stroke)
     val colorBaoGreen = context.getColor(R.color.bao_green)
+    val colorBaoGreenDark = context.getColor(R.color.bao_green_dark)
     val colorOnAccent = context.getColor(R.color.color_on_accent)
     val colorCallText = context.getColor(R.color.color_call_text)
     val colorCallTextSecondary = context.getColor(R.color.color_call_text_secondary)
@@ -75,6 +76,10 @@ class BaoTimeTheme(val context: Context) {
             setColor(fillColor)
             if (strokeColor != null) setStroke(hairline, strokeColor)
         }
+
+    /** Base chrome gradient behind the floating glass navigation; opaque fallback over the page background. */
+    fun chromeBackground(): GradientDrawable =
+        GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(colorChromeFallback, colorBg))
 
     fun controlForeground(activeColor: Int): ColorStateList = ColorStateList(
         arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),

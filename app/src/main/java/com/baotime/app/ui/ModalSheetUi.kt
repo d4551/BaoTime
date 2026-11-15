@@ -25,6 +25,30 @@ object ModalSheetUi {
         lateinit var updateAppearance: (BaoTimeTheme) -> Unit
     }
 
+    private class SheetScroll(context: Context) : ScrollView(context) {
+        lateinit var header: SheetHeader
+        private var headerTouch = false
+
+        init {
+            isFillViewport = false
+            clipToPadding = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+        }
+
+        override fun onInterceptTouchEvent(event: MotionEvent): Boolean = when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                headerTouch = header.hitsControl(this, event)
+                if (headerTouch) false else super.onInterceptTouchEvent(event)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val active = headerTouch
+                headerTouch = false
+                if (active) false else super.onInterceptTouchEvent(event)
+            }
+            else -> if (headerTouch) false else super.onInterceptTouchEvent(event)
+        }
+    }
+
     internal fun updateTheme(root: View, theme: BaoTimeTheme) {
         if (root is SheetFrame) root.updateAppearance(theme)
     }
@@ -42,13 +66,12 @@ object ModalSheetUi {
         root.addView(scrim, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         val card = if (content is LinearLayout) content else contentColumn(theme).apply { addView(content) }
         card.setPadding(theme.spaceLg, 0, theme.spaceLg, theme.spaceLg)
-        var header = sheetHeader(theme, card, onDismiss)
-        card.addView(header, 0)
+        val header = SheetHeader(theme, card, onDismiss)
+        card.addView(header.view, 0)
         val sheetBounds = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM)
-        val scroll = ScrollView(theme.context).apply {
-            isFillViewport = false
-            clipToPadding = false
+        val scroll = SheetScroll(theme.context).apply {
+            this.header = header
             addView(card)
         }
         root.addView(scroll, sheetBounds)
@@ -65,78 +88,99 @@ object ModalSheetUi {
             sheetBounds.setMargins(safe.left, safe.top, safe.right, safe.bottom)
             scroll.requestLayout()
         }
-        ForegroundSurface.bind(root, card, theme.context.getString(R.string.desc_sheet))
+        ForegroundSurface.bind(root, header.close, theme.context.getString(R.string.desc_sheet))
         root.updateAppearance = { current ->
             scrim.setBackgroundColor(current.colorScrim)
             card.setPadding(current.spaceLg, 0, current.spaceLg, current.spaceLg)
             glass?.updateMaterial(current, current.colorGlassSheet, current.colorChromeFallback)
-            val focusIndex = (0 until header.childCount).firstOrNull { header.getChildAt(it).hasFocus() }
-            card.removeView(header)
-            header = sheetHeader(current, card, onDismiss)
-            card.addView(header, 0)
-            if (focusIndex != null) header.getChildAt(focusIndex).requestFocus()
+            header.updateTheme(current)
         }
         return root
     }
 
-    private fun sheetHeader(theme: BaoTimeTheme, card: View, onDismiss: () -> Unit): FrameLayout =
-        FrameLayout(theme.context).apply {
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, theme.minTouchTarget)
-            addView(dragHandle(theme, card, onDismiss),
-                FrameLayout.LayoutParams(theme.minTouchTarget, theme.minTouchTarget, Gravity.CENTER))
-            val close = BaoTimeComponents.iconActionButton(theme,
-                BaoTimeComponents.RowAction(R.drawable.ic_close, R.string.desc_close_sheet) { onDismiss() })
-            addView(close, FrameLayout.LayoutParams(theme.minTouchTarget, theme.minTouchTarget, Gravity.END))
-        }
+    private class SheetHeader(initialTheme: BaoTimeTheme, cardMotion: View, onDismiss: () -> Unit) {
+        private var currentTheme = initialTheme
+        private var downY = 0f
 
-    private fun dragHandle(theme: BaoTimeTheme, cardMotion: View, onDismiss: () -> Unit): View {
-        var downY = 0f
-        val threshold = theme.minTouchTarget.toFloat()
-        return ImageButton(theme.context).apply {
-            val grabber = theme.surfaceDrawable(theme.radiusControl, theme.colorTextHint).apply {
-                setSize(resources.getDimensionPixelSize(R.dimen.sheet_grabber_width),
-                    resources.getDimensionPixelSize(R.dimen.sheet_grabber_height))
-            }
-            setImageDrawable(grabber)
-            imageTintList = theme.controlForeground(theme.colorTextHint)
+        private val drag = ImageButton(initialTheme.context).apply {
             scaleType = ImageView.ScaleType.CENTER
             stateListAnimator = null
-            background = theme.controlBackground(theme.colorControlClear)
-            contentDescription = theme.context.getString(R.string.desc_dismiss_sheet)
             setOnClickListener { onDismiss() }
-            setOnTouchListener { view, event ->
+            setOnTouchListener { target, event ->
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
                         downY = event.rawY
-                        view.parent.requestDisallowInterceptTouchEvent(true)
-                        view.isPressed = true
+                        target.parent.requestDisallowInterceptTouchEvent(true)
+                        target.isPressed = true
                         true
                     }
                     MotionEvent.ACTION_MOVE -> {
                         val distance = event.rawY - downY
                         cardMotion.translationY = distance.coerceAtLeast(0f)
-                        if (abs(distance) > theme.spaceSm) view.isPressed = false
+                        if (abs(distance) > currentTheme.spaceSm) target.isPressed = false
                         true
                     }
                     MotionEvent.ACTION_UP -> {
-                        view.parent.requestDisallowInterceptTouchEvent(false)
+                        target.parent.requestDisallowInterceptTouchEvent(false)
                         val distance = event.rawY - downY
                         cardMotion.translationY = 0f
-                        view.isPressed = false
-                        if (distance > threshold) onDismiss()
-                        else if (abs(distance) < theme.spaceSm) view.performClick()
+                        target.isPressed = false
+                        if (distance > currentTheme.minTouchTarget.toFloat()) onDismiss()
+                        else if (abs(distance) < currentTheme.spaceSm) target.performClick()
                         true
                     }
                     MotionEvent.ACTION_CANCEL -> {
-                        view.parent.requestDisallowInterceptTouchEvent(false)
+                        target.parent.requestDisallowInterceptTouchEvent(false)
                         cardMotion.translationY = 0f
-                        view.isPressed = false
+                        target.isPressed = false
                         true
                     }
                     else -> false
                 }
             }
         }
+
+        val close = BaoTimeComponents.iconActionButton(
+            initialTheme,
+            BaoTimeComponents.RowAction(R.drawable.ic_close, R.string.desc_close_sheet) { onDismiss() }
+        )
+
+        val view = FrameLayout(initialTheme.context).apply {
+            addView(drag)
+            addView(close)
+        }
+
+        init {
+            updateTheme(initialTheme)
+        }
+
+        fun updateTheme(theme: BaoTimeTheme) {
+            currentTheme = theme
+            view.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, theme.minTouchTarget)
+            val grabber = theme.surfaceDrawable(theme.radiusControl, theme.colorTextHint).apply {
+                setSize(drag.resources.getDimensionPixelSize(R.dimen.sheet_grabber_width),
+                    drag.resources.getDimensionPixelSize(R.dimen.sheet_grabber_height))
+            }
+            drag.setImageDrawable(grabber)
+            drag.imageTintList = theme.controlForeground(theme.colorTextHint)
+            drag.background = theme.controlBackground(theme.colorControlClear)
+            drag.contentDescription = theme.context.getString(R.string.desc_dismiss_sheet)
+            drag.layoutParams = FrameLayout.LayoutParams(theme.minTouchTarget, theme.minTouchTarget, Gravity.CENTER)
+            BaoTimeComponents.styleIconAction(theme, close, theme.colorControlClear, theme.colorTextPrimary)
+            close.contentDescription = theme.context.getString(R.string.desc_close_sheet)
+            close.layoutParams = FrameLayout.LayoutParams(theme.minTouchTarget, theme.minTouchTarget, Gravity.END)
+        }
+
+        fun hitsControl(scroll: ScrollView, event: MotionEvent): Boolean {
+            if (!view.isShown) return false
+            val card = scroll.getChildAt(0) ?: return false
+            val x = event.x + scroll.scrollX - card.left - card.translationX - view.left
+            val y = event.y + scroll.scrollY - card.top - card.translationY - view.top
+            return hits(drag, x, y) || hits(close, x, y)
+        }
+
+        private fun hits(target: View, x: Float, y: Float): Boolean =
+            target.isShown && x >= target.left && x < target.right && y >= target.top && y < target.bottom
     }
 
     fun contentColumn(theme: BaoTimeTheme): LinearLayout = LinearLayout(theme.context).apply {

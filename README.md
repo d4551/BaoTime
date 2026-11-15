@@ -3,8 +3,8 @@
 [![Version 1.1.0](https://img.shields.io/badge/version-1.1.0-087535)](#build-and-install)
 [![minSdk 29](https://img.shields.io/badge/minSdk-29-3DDC84?logo=android&logoColor=white)](#build-and-install)
 [![targetSdk / compileSdk 37](https://img.shields.io/badge/targetSdk%20%2F%20compileSdk-37-3DDC84?logo=android&logoColor=white)](#build-and-install)
-[![AGP 9.6.0-alpha03](https://img.shields.io/badge/AGP-9.6.0--alpha03-3DDC84)](#build-and-install)
-[![Gradle 9.9.0](https://img.shields.io/badge/Gradle-9.9.0-02303A?logo=gradle&logoColor=white)](#build-and-install)
+[![AGP 9.5.1](https://img.shields.io/badge/AGP-9.5.1-3DDC84)](#build-and-install)
+[![Gradle 9.9.1](https://img.shields.io/badge/Gradle-9.9.1-02303A?logo=gradle&logoColor=white)](#build-and-install)
 [![Daemon JDK 25](https://img.shields.io/badge/Daemon%20JDK-25-ED8B00?logo=openjdk&logoColor=white)](#build-and-install)
 [![Kotlin AGP built-in](https://img.shields.io/badge/Kotlin-AGP%20built--in-7F52FF?logo=kotlin&logoColor=white)](#code-map)
 [![OkHttp 5.5.1](https://img.shields.io/badge/OkHttp-5.5.1-009688)](#architecture)
@@ -34,6 +34,8 @@ BaoTime is an Android app for joining FaceTime web rooms, creating shareable lin
 
 BaoTime opens one room at a time in an embedded Android WebView and offers picture-in-picture. If the room fails to load or media access fails, copy the link and open it in the latest Chrome or Edge, the browsers Apple documents for FaceTime on Android. [Apple’s FaceTime web guide](https://support.apple.com/en-us/109364)
 
+Local emulator audits verify native UI, closed/unavailable Apple room screens, and Apple’s Terms modal inside the gated WebView; live two-way Apple-host FaceTime room admission and audio/video verification require an external Apple host and remain **`NOT RUN`** / externally blocked here.
+
 ## Connect to your Mac
 
 1. Run BlueBubbles Server **1.9.12** on a Mac signed in to FaceTime. Creating and answering calls through the server requires **Private API** enabled and the FaceTime helper connected. [Server 1.9.12](https://github.com/BlueBubblesApp/bluebubbles-server/releases/tag/v1.9.12) · [Private API setup](https://docs.bluebubbles.app/private-api/installation)
@@ -59,7 +61,7 @@ For webhook delivery, install and open [ntfy for Android](https://docs.ntfy.sh/s
 
 Install the **Android 17 SDK** (`platforms;android-37.0`) and Android SDK Platform-Tools. Set `ANDROID_HOME` or let Android Studio create `local.properties` with `sdk.dir`. [Android 17 SDK setup](https://developer.android.com/about/versions/17/setup-sdk)
 
-The project pins Gradle **9.9.0**, Android Gradle Plugin **9.6.0-alpha03**, and a Gradle daemon running on **JDK 25**. The wrapper needs a local Java installation to start and can provision the daemon JDK. [AGP release notes](https://developer.android.com/build/releases/agp-9-6-0-release-notes) · [Gradle daemon guide](https://docs.gradle.org/9.9.0/userguide/gradle_daemon.html)
+The project pins Gradle **9.9.1**, Android Gradle Plugin **9.5.1**, and a Gradle daemon running on **JDK 25**. The wrapper needs a local Java installation to start and can provision the daemon JDK. [AGP release notes](https://developer.android.com/build/releases/agp-9-5-0-release-notes) · [Gradle daemon guide](https://docs.gradle.org/9.9.1/userguide/gradle_daemon.html)
 
 From the repository root, with an emulator or a device with USB debugging enabled:
 
@@ -81,13 +83,25 @@ python3 scripts/audit_design.py
 
 The Gradle command runs JVM tests, builds the app and instrumentation APKs, and runs Android Lint. The Python audit checks design source and icon provenance.
 
+To audit the FaceTime WebView, open a room in a debuggable BaoTime build on a dedicated emulator. With Node.js 22 or later and `adb` on your PATH, run the following from the repository root. Substitute your emulator serial for `emulator-5554` and use a unique run ID for each scan.
+
+```sh
+npm --prefix scripts/axe ci --ignore-scripts
+npm --prefix scripts/axe run audit -- emulator-5554 room-default
+npm --prefix scripts/axe run audit -- emulator-5554 room-full-catalog full-catalog
+```
+
+Both scans save complete results under `build/reports/axe/` and exit with code 1 on violations. The full-catalog scan includes experimental rules. [axe-core 4.14.0 API](https://github.com/dequelabs/axe-core/blob/v4.14.0/doc/API.md)
+
 For [instrumented tests](app/src/androidTest/java/com/baotime/app/), select tests and runner arguments for the device you’re using.
 
 | Tests | Requirements |
 | --- | --- |
 | Native journeys, contacts, history, credential storage, and room UI | Dedicated audit emulator, `auditFixture=true`, and an `evidenceRun` of lowercase letters, digits, or hyphens |
 | `InstalledLauncherTest` | `installationCheck=true` and `evidenceRun` |
-| `DeviceConnectionCheckTest` | Xiaomi deployment device, `deploymentCheck=true`, and `expectedServer` matching the Tailscale HTTPS URL in the local `filesDir/deployment-connection-input.json` fixture |
+| `DeviceConnectionCheckTest` | Xiaomi deployment device, `deploymentCheck=true`, and `expectedServer` matching the Tailscale HTTPS URL in the local `filesDir/deployment-connection-input.json` fixture (**`NOT RUN`** in local emulator audits without that hardware) |
+
+Live two-way Apple-host FaceTime room admission and media verification likewise require an external Apple host and remain **`NOT RUN`** / externally blocked in local emulator audits.
 
 ## Architecture
 
@@ -356,13 +370,17 @@ flowchart TD
 
 | Area | Where to look |
 | --- | --- |
-| Android entry point, navigation, and call actions | [MainActivity](app/src/main/java/com/baotime/app/MainActivity.kt) |
+| Android entry point and activity lifecycle | [MainActivity](app/src/main/java/com/baotime/app/MainActivity.kt) |
+| Outgoing calls, join/open link actions | [CallLinkController](app/src/main/java/com/baotime/app/call/CallLinkController.kt) |
+| Tab selection, history and contacts rendering | [MainTabsController](app/src/main/java/com/baotime/app/ui/MainTabsController.kt) |
+| Call session, media consent, and PiP | [CallSessionController](app/src/main/java/com/baotime/app/call/CallSessionController.kt) |
 | Incoming call state shared by socket, push, and notification handling | [CallLifecycle](app/src/main/java/com/baotime/app/call/CallLifecycle.kt) |
+| Incoming invite intake (socket UUID, NLS URL, legacy) | [InviteIntake](app/src/main/java/com/baotime/app/call/InviteIntake.kt) |
 | BlueBubbles requests and server requirements | [BlueBubblesClient](app/src/main/java/com/baotime/app/network/BlueBubblesClient.kt) and [ServerCapability](app/src/main/java/com/baotime/app/network/ServerCapability.kt) |
 | Web room navigation and media permissions | [FaceTimeWebViewHelper](app/src/main/java/com/baotime/app/ui/FaceTimeWebViewHelper.kt) |
 | Build settings and dependency pins | [App build configuration](app/build.gradle.kts) and [Android Gradle plugin pin](build.gradle.kts) |
 
 <a name="documentation-index"></a>
 
-See the [implementation notes](tasks/README.md) for server contracts and device verification, and [NOTICE](NOTICE) for third-party dependency notices.
+See [NOTICE](NOTICE) for third-party dependency notices.
 

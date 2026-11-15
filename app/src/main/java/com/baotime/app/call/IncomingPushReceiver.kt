@@ -5,8 +5,6 @@ import android.content.Context
 import android.content.Intent
 import com.baotime.app.BaoTimeApp
 import com.baotime.app.network.FaceTimePushHandler
-import com.baotime.app.network.FaceTimeSessionStatus
-import com.baotime.app.network.IncomingFaceTimeEvent
 
 /** Receives ntfy connector callbacks for the current Mac and forwards FaceTime events to CallLifecycle. */
 class IncomingPushReceiver : BroadcastReceiver() {
@@ -27,7 +25,7 @@ class IncomingPushReceiver : BroadcastReceiver() {
                 ACTION_UNIFIED_PUSH_MESSAGE -> {
                     val rawPayload = extractPayloadString(intent) ?: return@onPushCallback
                     val event = FaceTimePushHandler.parsePushPayload(rawPayload) ?: return@onPushCallback
-                    handlePushEvent(app, event, revision)
+                    app.callLifecycle.onIncomingEvent(event, configGeneration = revision, source = InviteSource.Fcm)
                 }
                 ACTION_UNIFIED_PUSH_UNREGISTERED,
                 ACTION_UNIFIED_PUSH_REGISTRATION_FAILED -> UnifiedPushRegistrar.onUnregistered(app.pushStore, incomingToken)
@@ -53,38 +51,5 @@ class IncomingPushReceiver : BroadcastReceiver() {
         const val EXTRA_MESSAGE = "message"
         const val EXTRA_ENDPOINT = "endpoint"
         const val EXTRA_PUSH_CALL_UUID = "com.baotime.app.extra.PUSH_CALL_UUID"
-
-        /** Routes a parsed [IncomingFaceTimeEvent] into the process call lifecycle. */
-        private fun handlePushEvent(app: BaoTimeApp, event: IncomingFaceTimeEvent, revision: Long) {
-            when (event) {
-                is IncomingFaceTimeEvent.CallStatusChanged -> {
-                    when (event.status) {
-                        FaceTimeSessionStatus.INCOMING -> {
-                            app.callLifecycle.onIncomingUuid(
-                                callUuid = event.uuid,
-                                caller = event.address.orEmpty(),
-                                configGeneration = revision,
-                                source = InviteSource.Fcm
-                            )
-                        }
-                        FaceTimeSessionStatus.DISCONNECTED -> {
-                            app.callLifecycle.onCallDisconnected(
-                                callUuid = event.uuid,
-                                configGeneration = revision
-                            )
-                        }
-                        else -> Unit
-                    }
-                }
-                is IncomingFaceTimeEvent.LegacyIncoming -> {
-                    app.callLifecycle.onIncomingLegacy(
-                        caller = event.caller.orEmpty(),
-                        timestampMs = event.timestampMs,
-                        configGeneration = revision
-                    )
-                }
-            }
-        }
-
     }
 }

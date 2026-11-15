@@ -113,12 +113,13 @@ object IncomingFaceTimeParser {
 
     internal fun toJsonObject(raw: String?): JSONObject? {
         val trimmed = raw?.trim() ?: return null
-        return try {
+        return runCatching {
             val decoded = if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
                 JSONObject("{\"v\":$trimmed}").optString("v").trim()
             } else trimmed
             if (decoded.startsWith('{') && decoded.endsWith('}')) JSONObject(decoded) else null
-        } catch (_: JSONException) {
+        }.getOrElse { outcome ->
+            if (outcome !is JSONException) throw outcome
             null
         }
     }

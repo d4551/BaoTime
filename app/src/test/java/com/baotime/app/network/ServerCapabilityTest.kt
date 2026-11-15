@@ -29,42 +29,35 @@ class ServerCapabilityTest {
         server.shutdown()
     }
 
-    private fun readFixture(name: String): String {
-        val stream = checkNotNull(javaClass.classLoader?.getResourceAsStream("bluebubbles/$name")) {
-            "Missing fixture bluebubbles/$name"
-        }
-        return stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-    }
-
     @Test
     fun fixtures_existAndMatchBlueBubbles1912SchemaWithoutSecrets() {
-        val ping = JSONObject(readFixture("ping.json"))
+        val ping = JSONObject(BlueBubblesFixtures.read("ping.json"))
         assertEquals(200, ping.getInt("status"))
         assertEquals("pong", ping.getString("data"))
 
-        val helperOn = JSONObject(readFixture("server-info-helper-on.json")).getJSONObject("data")
+        val helperOn = JSONObject(BlueBubblesFixtures.read("server-info-helper-on.json")).getJSONObject("data")
         assertEquals("1.9.12", helperOn.getString("server_version"))
         assertTrue(helperOn.getBoolean("private_api"))
         assertTrue(helperOn.getBoolean("helper_connected"))
         assertFalse(helperOn.has("facetime_calling"))
 
-        val helperOff = JSONObject(readFixture("server-info-helper-off.json")).getJSONObject("data")
+        val helperOff = JSONObject(BlueBubblesFixtures.read("server-info-helper-off.json")).getJSONObject("data")
         assertEquals("1.9.12", helperOff.getString("server_version"))
         assertTrue(helperOff.getBoolean("private_api"))
         assertFalse(helperOff.getBoolean("helper_connected"))
         assertFalse(helperOff.has("facetime_calling"))
 
-        val incoming = readFixture("ft-call-status-changed-incoming.json")
+        val incoming = BlueBubblesFixtures.read("ft-call-status-changed-incoming.json")
         val parsedIncoming = IncomingFaceTimeParser.parseCallStatusChanged(incoming)
         assertNotNull(parsedIncoming)
         assertEquals(4, parsedIncoming?.statusId)
 
-        val disconnected = readFixture("ft-call-status-changed-disconnected.json")
+        val disconnected = BlueBubblesFixtures.read("ft-call-status-changed-disconnected.json")
         val parsedDisconnected = IncomingFaceTimeParser.parseCallStatusChanged(disconnected)
         assertNotNull(parsedDisconnected)
         assertEquals(6, parsedDisconnected?.statusId)
 
-        val legacy = readFixture("incoming-facetime-legacy.json")
+        val legacy = BlueBubblesFixtures.read("incoming-facetime-legacy.json")
         val parsedLegacy = IncomingFaceTimeParser.parseLegacyIncoming(legacy)
         assertNotNull(parsedLegacy)
         assertEquals("caller@example.com", parsedLegacy?.caller)
@@ -87,7 +80,7 @@ class ServerCapabilityTest {
 
     @Test
     fun createFaceTimeSession_failsClosedWhenHelperIsOffWithoutCallingCreateEndpoint() = runBlocking {
-        server.enqueue(MockResponse().setResponseCode(200).setBody(readFixture("server-info-helper-off.json")))
+        server.enqueue(MockResponse().setResponseCode(200).setBody(BlueBubblesFixtures.read("server-info-helper-off.json")))
         val client = BlueBubblesClient(
             endpointProvider = {
                 EndpointSnapshot(
@@ -106,7 +99,7 @@ class ServerCapabilityTest {
 
     @Test
     fun createFaceTimeSession_failsClosedOnUnsupportedVersion() = runBlocking {
-        val oldVersionJson = readFixture("server-info-helper-on.json")
+        val oldVersionJson = BlueBubblesFixtures.read("server-info-helper-on.json")
             .replace("\"1.9.12\"", "\"1.9.9\"")
         server.enqueue(MockResponse().setResponseCode(200).setBody(oldVersionJson))
         val client = BlueBubblesClient(
@@ -132,7 +125,7 @@ class ServerCapabilityTest {
 
     @Test
     fun createFaceTimeSession_succeedsWhenCapable1912ServerReturnsFaceTimeUrl() = runBlocking {
-        server.enqueue(MockResponse().setResponseCode(200).setBody(readFixture("server-info-helper-on.json")))
+        server.enqueue(MockResponse().setResponseCode(200).setBody(BlueBubblesFixtures.read("server-info-helper-on.json")))
         server.enqueue(
             MockResponse().setResponseCode(200).setBody(
                 """{"status":200,"message":"Success","data":{"link":"https://facetime.apple.com/join#v=1&p=abc&k=def"}}"""

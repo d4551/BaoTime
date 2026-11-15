@@ -120,10 +120,11 @@ class CallSessionController(
     private fun startConsent(consent: Consent, launch: () -> Unit): Boolean {
         if (pendingConsent != null) return false
         pendingConsent = consent
-        try {
+        runCatching {
             refreshPipEligibility()
             launch()
-        } catch (failure: RuntimeException) {
+        }.onFailure { failure ->
+            if (failure !is RuntimeException) throw failure
             pendingConsent = null
             refreshPipEligibility()
             throw failure

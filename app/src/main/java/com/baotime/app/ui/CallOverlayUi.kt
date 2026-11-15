@@ -49,6 +49,7 @@ object CallOverlayUi {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
         val heading = BaoTimeComponents.titleText(theme, title).apply {
+            isAccessibilityHeading = true
             BaoTimeComponents.styleTitle(theme, this, theme.colorCallText)
         }
         identity.addView(heading)
@@ -92,7 +93,7 @@ object CallOverlayUi {
                 view.layoutDirection)
             view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
         }
-        ForegroundSurface.bind(root, status, title, lightStatusBars = false,
+        ForegroundSurface.bind(root, close, title, lightStatusBars = false,
             lightNavigationBars = false, systemBarColor = theme.colorCallChrome) { top ->
             status.accessibilityLiveRegion = if (top) View.ACCESSIBILITY_LIVE_REGION_POLITE else View.ACCESSIBILITY_LIVE_REGION_NONE
             onTopChanged(top)

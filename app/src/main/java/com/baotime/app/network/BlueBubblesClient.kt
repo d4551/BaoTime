@@ -88,9 +88,7 @@ class BlueBubblesClient(
     suspend fun checkServerStatus(): BlueBubblesServerStatus {
         val request = statusRequests.incrementAndGet()
         return withContext(Dispatchers.IO) {
-            val configuration = try {
-                endpointProvider()
-            } catch (failure: Exception) {
+            val configuration = runCatching { endpointProvider() }.getOrElse { failure ->
                 return@withContext BlueBubblesServerStatus(reachable = false, failure = classifyFailure(failure))
             }
             val endpoint = configuredEndpoint(snapshot = configuration)

@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Insets
 import android.view.Gravity
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -24,6 +25,21 @@ object IncomingCallUi {
         lateinit var updateAppearance: (BaoTimeTheme) -> Unit
     }
 
+    /** Control row that wraps vertically when the labels no longer fit side by side. */
+    private class AdaptiveControlRow(context: Context, private val buttons: List<Button>, private val gap: Int) :
+        LinearLayout(context) {
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            val available = MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight
+            val required = buttons.sumOf { button ->
+                maxOf(button.minimumWidth, ceil(button.paint.measureText(button.text.toString())).toInt() +
+                    button.paddingLeft + button.paddingRight) + gap * 2
+            }
+            val direction = if (available > 0 && required > available) VERTICAL else HORIZONTAL
+            if (orientation != direction) orientation = direction
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        }
+    }
+
     internal fun updateTheme(root: FrameLayout, theme: BaoTimeTheme) {
         if (root is IncomingFrame) root.updateAppearance(theme)
     }
@@ -34,16 +50,27 @@ object IncomingCallUi {
         onAccept: () -> Unit,
         onDecline: () -> Unit
     ): FrameLayout {
-        val context = theme.context
-        var currentTheme = theme
-        var navigationInsets = Insets.NONE
-        val root = IncomingFrame(context).apply {
+        val root = IncomingFrame(theme.context).apply {
             setBackgroundColor(theme.colorCallChrome)
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
         }
+        buildIncomingContent(theme, caller, onAccept, onDecline, root)
+        return root
+    }
+
+    private fun buildIncomingContent(
+        theme: BaoTimeTheme,
+        caller: String,
+        onAccept: () -> Unit,
+        onDecline: () -> Unit,
+        root: IncomingFrame
+    ): IncomingFrame {
+        val context = theme.context
+        var currentTheme = theme
+        var navigationInsets = Insets.NONE
         root.apply {
             val column = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
@@ -54,6 +81,7 @@ object IncomingCallUi {
             val badge = BaoTimeComponents.badgeView(theme, caller.trim().firstOrNull()?.uppercaseChar()?.toString().orEmpty())
             column.addView(badge)
             val heading = BaoTimeComponents.titleText(theme, caller).apply {
+                isAccessibilityHeading = true
                 BaoTimeComponents.styleTitle(theme, this, theme.colorCallText, theme.textSizeTitlePx)
                 gravity = Gravity.CENTER
             }
@@ -73,18 +101,7 @@ object IncomingCallUi {
                 bgColor = theme.colorBaoGreen, captionColor = theme.colorCallText, iconTint = theme.colorOnAccent
             ) { onAccept() }
             val buttons = listOf(decline, accept)
-            val controls = object : LinearLayout(context) {
-                override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-                    val available = MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight
-                    val required = buttons.sumOf { button ->
-                        maxOf(button.minimumWidth, ceil(button.paint.measureText(button.text.toString())).toInt() +
-                            button.paddingLeft + button.paddingRight) + theme.spaceMd * 2
-                    }
-                    val direction = if (available > 0 && required > available) VERTICAL else HORIZONTAL
-                    if (orientation != direction) orientation = direction
-                    super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-                }
-            }.apply {
+            val controls = AdaptiveControlRow(context, buttons, theme.spaceMd).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
                 setPadding(0, theme.spaceXl, 0, 0)
@@ -105,7 +122,7 @@ object IncomingCallUi {
                     view.layoutDirection)
                 view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
             }
-            ForegroundSurface.bind(this, column, caller, lightStatusBars = false, lightNavigationBars = false,
+            ForegroundSurface.bind(this, decline, caller, lightStatusBars = false, lightNavigationBars = false,
                 systemBarColor = theme.colorCallChrome)
             updateAppearance = { updated ->
                 currentTheme = updated

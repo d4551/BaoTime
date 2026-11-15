@@ -6,6 +6,7 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageButton
@@ -56,6 +57,7 @@ object BaoTimeComponents {
         setPadding(0, theme.spaceMd, 0, theme.spaceMd)
         setSingleLine(true)
         this.inputType = inputType
+        imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
         setText(value)
         minHeight = theme.minTouchTarget
         minimumHeight = theme.minTouchTarget
@@ -130,24 +132,25 @@ object BaoTimeComponents {
         val iconTint: Int? = null, val onClick: (View) -> Unit)
 
     /** Informational direction glyph: its visual size is independent of action hit targets. */
-    fun iconBadge(theme: BaoTimeTheme, iconRes: Int, tint: Int, descriptionRes: Int): ImageView =
+    fun iconBadge(theme: BaoTimeTheme, iconRes: Int, tint: Int): ImageView =
         ImageView(theme.context).apply {
             setImageResource(iconRes)
             imageTintList = theme.controlForeground(tint)
-            contentDescription = context.getString(descriptionRes)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             layoutParams = LinearLayout.LayoutParams(theme.infoSize, theme.infoSize).apply { marginEnd = theme.spaceMd }
             scaleType = ImageView.ScaleType.CENTER_INSIDE
         }
 
     internal class ListRow(
         val root: LinearLayout,
+        val primary: LinearLayout,
         private val monogram: TextView?,
         private val title: TextView,
         private val caption: TextView,
         private val chevron: ImageView?
     ) {
         fun updateTheme(theme: BaoTimeTheme) {
-            root.background = theme.listRowBackground()
+            primary.background = theme.listRowBackground()
             monogram?.let { styleCaption(theme, it) }
             styleTitle(theme, title)
             styleCaption(theme, caption)
@@ -157,33 +160,43 @@ object BaoTimeComponents {
 
     internal fun listRow(theme: BaoTimeTheme, monogram: String, title: String, caption: TextView,
         actions: List<RowAction>, badgeIconRes: Int? = null, badgeTint: Int? = null,
-        badgeDescriptionRes: Int? = null, showChevron: Boolean = false
+        showChevron: Boolean = false
     ): ListRow {
         val row = LinearLayout(theme.context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            if (actions.isEmpty()) {
+                setPadding(0, theme.spaceMd, 0, theme.spaceMd)
+                minimumHeight = theme.minTouchTarget
+                background = theme.listRowBackground()
+            }
+        }
+        val primary = if (actions.isEmpty()) row else LinearLayout(theme.context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, theme.spaceMd, 0, theme.spaceMd)
             minimumHeight = theme.minTouchTarget
             background = theme.listRowBackground()
-        }
-        val monogramView = if (badgeIconRes != null && badgeTint != null && badgeDescriptionRes != null) {
-            row.addView(iconBadge(theme, badgeIconRes, badgeTint, badgeDescriptionRes))
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }.also(row::addView)
+        val monogramView = if (badgeIconRes != null && badgeTint != null) {
+            primary.addView(iconBadge(theme, badgeIconRes, badgeTint))
             null
-        } else if (monogram.isNotEmpty()) badgeView(theme, monogram).also(row::addView)
+        } else if (monogram.isNotEmpty()) badgeView(theme, monogram).also(primary::addView)
         else null
         val info = infoColumn(theme)
         val heading = titleText(theme, title)
         info.addView(heading)
         info.addView(caption)
-        row.addView(info)
-        actions.forEach { row.addView(iconActionButton(theme, it)) }
+        primary.addView(info)
         val chevron = if (showChevron) ImageView(theme.context).apply {
             setImageResource(R.drawable.ic_chevron)
             imageTintList = theme.controlForeground(theme.colorTextHint)
             layoutParams = LinearLayout.LayoutParams(theme.infoSize, theme.infoSize)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }.also(row::addView) else null
-        return ListRow(row, monogramView, heading, caption, chevron)
+        }.also(primary::addView) else null
+        actions.forEach { row.addView(iconActionButton(theme, it)) }
+        return ListRow(row, primary, monogramView, heading, caption, chevron)
     }
 
     /** A native actionable target with centered artwork, keyboard focus and native ripple feedback. */
@@ -194,14 +207,14 @@ object BaoTimeComponents {
         stateListAnimator = null
         layoutParams = LinearLayout.LayoutParams(theme.minTouchTarget, theme.minTouchTarget).apply { marginStart = theme.spaceXs }
         scaleType = ImageView.ScaleType.CENTER
-        val inset = (theme.minTouchTarget - theme.iconSize) / 2
-        setPadding(inset, inset, inset, inset)
         setOnClickListener { action.onClick(it) }
     }
 
     internal fun styleIconAction(theme: BaoTimeTheme, button: ImageButton, fill: Int, tint: Int) {
         button.background = theme.controlBackground(fill, oval = true)
         button.imageTintList = theme.controlForeground(tint)
+        val inset = (theme.minTouchTarget - theme.iconSize) / 2
+        button.setPadding(inset, inset, inset, inset)
     }
 
     fun animateRowIn(view: View, index: Int) {

@@ -107,10 +107,7 @@ class FaceTimeWebViewHelper @JvmOverloads constructor(
                     UrlRouter.isAppleMediaUrl(request.url.toString())
                 }
                 if (!permitted && request.isForMainFrame) {
-                    resetPageAccessibility()
-                    mainFrameFailed = true
-                    denyHeldMedia()
-                    view.settings.javaScriptEnabled = false
+                    failMainFrame()
                     view.stopLoading()
                     publishPageStatus(R.string.call_status_navigation_blocked)
                 }
@@ -233,11 +230,16 @@ class FaceTimeWebViewHelper @JvmOverloads constructor(
     }
 
     private fun pageFailed() {
+        failMainFrame()
+        publishPageStatus(R.string.call_status_failed)
+    }
+
+    /** Shared main-frame failure core: reset accessibility, mark failed, deny held media, disable JS. */
+    private fun failMainFrame() {
         resetPageAccessibility()
         mainFrameFailed = true
         denyHeldMedia()
         webView.settings.javaScriptEnabled = false
-        publishPageStatus(R.string.call_status_failed)
     }
 
     private fun isCurrentRoomPage(url: String, generation: Long): Boolean =
@@ -288,9 +290,8 @@ class FaceTimeWebViewHelper @JvmOverloads constructor(
 
         val context = webView.context
         val intent = Intent(Intent.ACTION_VIEW, request.url).addCategory(Intent.CATEGORY_BROWSABLE)
-        try {
-            context.startActivity(intent)
-        } catch (_: ActivityNotFoundException) {
+        runCatching { context.startActivity(intent) }.onFailure { outcome ->
+            if (outcome !is ActivityNotFoundException) throw outcome
             Toast.makeText(context, R.string.call_status_browser_unavailable, Toast.LENGTH_LONG).show()
         }
         return true

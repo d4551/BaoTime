@@ -73,14 +73,13 @@ object SystemIntegration {
         return launchActivity(context, chooser)
     }
 
-    private fun launchActivity(context: Context, intent: Intent): Boolean = try {
-        context.startActivity(intent)
-        true
-    } catch (_: ActivityNotFoundException) {
-        false
-    } catch (_: SecurityException) {
-        false
-    }
+    private fun launchActivity(context: Context, intent: Intent): Boolean =
+        runCatching { context.startActivity(intent) }.fold(
+            onSuccess = { true },
+            onFailure = { outcome ->
+                if (outcome is ActivityNotFoundException || outcome is SecurityException) false else throw outcome
+            }
+        )
 
     internal fun copySensitiveText(context: Context, label: CharSequence, value: String): Boolean {
         val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return false

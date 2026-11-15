@@ -52,6 +52,7 @@ object SetupTabUi {
         private var theme = theme
         private val context = theme.context
         private val title = BaoTimeComponents.titleText(theme, context.getString(R.string.tab_setup)).apply {
+            isAccessibilityHeading = true
             setPadding(0, theme.spaceSm, 0, theme.spaceLg)
         }
         private val links = settingAction(theme, R.drawable.ic_link) {
@@ -65,6 +66,7 @@ object SetupTabUi {
         }
         private val alerts = settingAction(theme, R.drawable.ic_bell, onCallAlerts)
         private val webhookTitle = BaoTimeComponents.titleText(theme, context.getString(R.string.setup_webhook_title)).apply {
+            isAccessibilityHeading = true
             setPadding(0, theme.spaceXl, 0, theme.spaceSm)
         }
         private val webhookStatus = BaoTimeComponents.captionText(theme, "").apply {
@@ -75,6 +77,7 @@ object SetupTabUi {
                 Toast.LENGTH_SHORT).show()
         }.apply { setText(R.string.setup_webhook_copy) }
         private val connectionTitle = BaoTimeComponents.titleText(theme, context.getString(R.string.setup_config_title)).apply {
+            isAccessibilityHeading = true
             setPadding(0, theme.spaceXl, 0, theme.spaceMd)
         }
         private val url = BaoTimeComponents.textField(theme, R.string.setup_server_url_hint, status.connection.url)

@@ -27,31 +27,11 @@ class BlueBubblesSocketRecoveryTest {
         scope.cancel()
     }
 
-    private class RecordingEngine(val listener: SocketEngineListener) : SocketEngine {
-        var connected = false
-        var closed = false
-
-        override fun connect() {
-            connected = true
-            listener.onConnect()
-        }
-
-        override fun disconnect() {
-            connected = false
-            listener.onDisconnect()
-        }
-
-        override fun close() {
-            connected = false
-            closed = true
-        }
-    }
-
     @Test
     fun offlineSocket_recoversToConnectedWhenEnsureConnectedRunsAgain() {
         var pingResult: ServerPingResult = ServerPingResult.Unreachable(ServerFailure.HttpFailed)
         var pingCalls = 0
-        val engines = mutableListOf<RecordingEngine>()
+        val engines = mutableListOf<FakeSocketEngine>()
         val lifecycle = CallLifecycle(
             scope = scope,
             initialConfigGeneration = 1L,
@@ -70,7 +50,7 @@ class BlueBubblesSocketRecoveryTest {
             },
             callLifecycle = lifecycle,
             engineFactory = { _, _, listener ->
-                RecordingEngine(listener).also { engines.add(it) }
+                FakeSocketEngine(listener).also { engines.add(it) }
             }
         )
 
@@ -101,7 +81,7 @@ class BlueBubblesSocketRecoveryTest {
     fun ensureConnected_whilePingSuspended_doesNotCancelOrDuplicateHandshake() {
         val gate = CompletableDeferred<ServerPingResult>()
         var pingCalls = 0
-        val engines = mutableListOf<RecordingEngine>()
+        val engines = mutableListOf<FakeSocketEngine>()
         val lifecycle = CallLifecycle(
             scope = scope,
             initialConfigGeneration = 1L,
@@ -120,7 +100,7 @@ class BlueBubblesSocketRecoveryTest {
             },
             callLifecycle = lifecycle,
             engineFactory = { _, _, listener ->
-                RecordingEngine(listener).also { engines.add(it) }
+                FakeSocketEngine(listener).also { engines.add(it) }
             }
         )
 

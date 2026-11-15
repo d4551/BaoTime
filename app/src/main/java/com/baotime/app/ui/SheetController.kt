@@ -138,7 +138,7 @@ class SheetController(
         val canUse = { revision == null || revision == config.connectionRevision() }
         if (!canUse()) return
         dismiss()
-        val title = BaoTimeComponents.titleText(theme, contact.displayName)
+        val title = BaoTimeComponents.titleText(theme, contact.displayName).apply { isAccessibilityHeading = true }
         val address = BaoTimeComponents.captionText(theme, contact.primaryAddress)
         val faceTime = BaoTimeComponents.ActionRow(theme, R.drawable.ic_video_call, R.string.contact_action_facetime) {
             if (canUse()) { dismiss(); onCall(contact.primaryAddress, contact.displayName, revision) }
@@ -173,7 +173,9 @@ class SheetController(
 
     fun showClearHistory() {
         dismiss()
-        val title = BaoTimeComponents.titleText(theme, context.getString(R.string.clear_history_title))
+        val title = BaoTimeComponents.titleText(theme, context.getString(R.string.clear_history_title)).apply {
+            isAccessibilityHeading = true
+        }
         val message = BaoTimeComponents.captionText(theme, context.getString(R.string.clear_history_body))
         val cancel = BaoTimeComponents.actionButton(theme, context.getString(R.string.action_cancel),
             theme.colorControlClear, theme.colorTextPrimary,

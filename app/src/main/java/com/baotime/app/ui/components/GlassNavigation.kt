@@ -130,7 +130,7 @@ private class GlassSurfaceDrawable(
     }
 
     fun refresh() {
-        if (Build.VERSION.SDK_INT < 31 || !AppearancePreferences.backdropEnabled(theme.context)) {
+        if (Build.VERSION.SDK_INT < 31 || !AppearancePreferences.backdropEnabled(theme.context) || !target.isShown) {
             clear()
             return
         }
@@ -139,14 +139,15 @@ private class GlassSurfaceDrawable(
     }
 
     private fun scheduleCapture() {
-        if (!captureNeeded || captureScheduled || blurRunning || bounds.isEmpty || !target.isAttachedToWindow) return
+        if (!captureNeeded || captureScheduled || blurRunning || bounds.isEmpty ||
+            !target.isAttachedToWindow || !target.isShown) return
         captureScheduled = true
         target.postOnAnimation(captureFrame)
     }
 
     private fun capture() {
         captureScheduled = false
-        if (!target.isAttachedToWindow || bounds.isEmpty) return
+        if (!target.isAttachedToWindow || !target.isShown || bounds.isEmpty) return
         if (!source.isAttachedToWindow || source.windowToken != target.windowToken ||
             !AppearancePreferences.backdropEnabled(theme.context)
         ) {
@@ -158,7 +159,7 @@ private class GlassSurfaceDrawable(
         val sampleScale = minOf(1f, 512f / maxOf(bounds.width(), bounds.height()).toFloat())
         val bitmap = createBitmap((bounds.width() * sampleScale).toInt().coerceAtLeast(1),
             (bounds.height() * sampleScale).toInt().coerceAtLeast(1))
-        try {
+        runCatching {
             bitmap.eraseColor(fallbackColor)
             source.getLocationInWindow(sourcePosition)
             target.getLocationInWindow(targetPosition)
@@ -173,12 +174,8 @@ private class GlassSurfaceDrawable(
             val radius = (theme.glassBlurRadius * sampleScale).toInt().coerceIn(1, 25)
             blurRunning = true
             executor.execute {
-                val failure = try {
-                    BoxBlur.blur(bitmap, radius, scratch)
-                    null
-                } catch (failure: RuntimeException) {
-                    failure
-                }
+                val blurOutcome = runCatching { BoxBlur.blur(bitmap, radius, scratch) }
+                val failure = blurOutcome.exceptionOrNull()?.let { if (it is RuntimeException) it else throw it }
                 val complete = Runnable { finishCapture(bitmap, generation, failure) }
                 if (!mainHandler.post {
                         if (!target.isAttachedToWindow || !target.post(complete)) complete.run()
@@ -188,7 +185,8 @@ private class GlassSurfaceDrawable(
                     executor.shutdown()
                 }
             }
-        } catch (failure: RuntimeException) {
+        }.onFailure { failure ->
+            if (failure !is RuntimeException) throw failure
             finishCapture(bitmap, generation, failure)
         }
     }
@@ -199,8 +197,8 @@ private class GlassSurfaceDrawable(
             releaseWorker()
             Log.w(TAG, "Backdrop capture failed", failure)
         }
-        val eligible = target.isAttachedToWindow && source.isAttachedToWindow && source.windowToken == target.windowToken &&
-            AppearancePreferences.backdropEnabled(theme.context)
+        val eligible = target.isAttachedToWindow && target.isShown && source.isAttachedToWindow &&
+            source.windowToken == target.windowToken && AppearancePreferences.backdropEnabled(theme.context)
         if (generation == geometryGeneration && eligible) {
             sample = bitmap.takeIf { failure == null }
             blurred = failure == null

@@ -34,14 +34,7 @@ dist/
 # Generated test evidence and language caches
 __pycache__/
 *.py[cod]
-# Exclude evidence contents, not the directory itself: git never descends into an
-# excluded directory, so a negation below it could not take effect.
-/evidence/*
-# Audit reports are deliverables, not scratch output: keep them reviewable in git.
-!/evidence/axe-2026-11-13/
-!/evidence/device-2026-11-13/
-!/evidence/burndown-2026-11-13/
+/evidence/
 
 # Loop-discipline working ledger
 LOOP-STATE.md
-/evidence

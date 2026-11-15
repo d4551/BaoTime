@@ -9,15 +9,10 @@ import org.junit.Test
 
 class IncomingFaceTimePayloadTest {
 
-    private fun readFixture(name: String): String =
-        checkNotNull(javaClass.classLoader?.getResourceAsStream("bluebubbles/$name"))
-            .bufferedReader(Charsets.UTF_8)
-            .use { it.readText() }
-
     @Test
     fun parseCallStatusChanged_parsesIncomingAndDisconnectedFixtures() {
         val incoming = IncomingFaceTimeParser.parseCallStatusChanged(
-            readFixture("ft-call-status-changed-incoming.json")
+            BlueBubblesFixtures.read("ft-call-status-changed-incoming.json")
         )
         assertNotNull(incoming)
         assertEquals("00000000-0000-4000-8000-000000000001", incoming?.uuid)
@@ -28,7 +23,7 @@ class IncomingFaceTimePayloadTest {
         assertTrue(incoming?.isVideo ?: false)
 
         val disconnected = IncomingFaceTimeParser.parseCallStatusChanged(
-            readFixture("ft-call-status-changed-disconnected.json")
+            BlueBubblesFixtures.read("ft-call-status-changed-disconnected.json")
         )
         assertNotNull(disconnected)
         assertEquals("00000000-0000-4000-8000-000000000001", disconnected?.uuid)
@@ -47,7 +42,7 @@ class IncomingFaceTimePayloadTest {
     @Test
     fun parseLegacyIncoming_parsesJsonStringWithoutFabricatingUuid() {
         val legacy = IncomingFaceTimeParser.parseLegacyIncoming(
-            readFixture("incoming-facetime-legacy.json")
+            BlueBubblesFixtures.read("incoming-facetime-legacy.json")
         )
         assertNotNull(legacy)
         assertEquals("caller@example.com", legacy?.caller)

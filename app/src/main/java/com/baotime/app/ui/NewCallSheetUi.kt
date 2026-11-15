@@ -32,7 +32,9 @@ class NewCallSheetUi(
     private val macStatus = ContactsTabUi.Status(theme)
     private val empty = ContactsTabUi.Status(theme)
     private val rows = ContactsTabUi.ContactRows(theme, showAddressKind = false, onContact = onFaceTime)
-    private val title = BaoTimeComponents.titleText(theme, theme.context.getString(R.string.dialer_title))
+    private val title = BaoTimeComponents.titleText(theme, theme.context.getString(R.string.dialer_title)).apply {
+        isAccessibilityHeading = true
+    }
     private val explanation = BaoTimeComponents.captionText(theme, theme.context.getString(R.string.new_call_explanation))
     private val input = BaoTimeComponents.textField(theme, R.string.input_hint, initialHandle,
         InputType.TYPE_CLASS_TEXT).apply {

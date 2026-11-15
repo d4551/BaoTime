@@ -1,7 +1,6 @@
 package com.baotime.app
 
 import android.content.Intent
-import android.net.Uri
 import android.app.Activity
 import androidx.test.runner.lifecycle.ActivityLifecycleCallback
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
@@ -11,10 +10,10 @@ import java.util.concurrent.TimeUnit
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
-import java.io.File
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -80,10 +79,10 @@ class NativeJourneysTest {
             assertTrue(device.wait(Until.gone(By.text("New Call")), 5000))
         }
         device.findObject(By.desc("New Call")).click()
-        val handle = requireNotNull(device.wait(Until.findObject(By.desc("Close sheet; drag down or tap")), 5000))
+        val handle = requireNotNull(device.wait(Until.findObject(By.desc(context.getString(R.string.desc_dismiss_sheet))), 5000))
         val bounds = handle.visibleBounds
         device.swipe(bounds.centerX(), bounds.centerY(), bounds.centerX(), bounds.centerY() + 250, 30)
-        assertTrue(device.wait(Until.gone(By.desc("Close sheet; drag down or tap")), 5000))
+        assertTrue(device.wait(Until.gone(By.desc(context.getString(R.string.desc_dismiss_sheet))), 5000))
         capture("sheet-drag-dismissed")
     }
 
@@ -105,7 +104,7 @@ class NativeJourneysTest {
         assertNotNull(device.wait(Until.findObject(By.text("Cancel")), 5000))
         capture("clear-confirmation")
         device.findObject(By.text("Cancel")).click()
-        assertTrue(device.wait(Until.gone(By.desc("Close sheet; drag down or tap")), 5000))
+        assertTrue(device.wait(Until.gone(By.desc(context.getString(R.string.desc_dismiss_sheet))), 5000))
     }
 
     @Test fun setupKeyboardInvalidSaveScrollAndClose() {
@@ -119,7 +118,7 @@ class NativeJourneysTest {
         assertNotNull(device.wait(Until.findObject(By.textContains("Enter a valid")), 5000))
         capture("setup-invalid-save")
         device.findObject(By.desc(context.getString(R.string.desc_close_sheet))).click()
-        assertTrue(device.wait(Until.gone(By.desc("Close sheet; drag down or tap")), 5000))
+        assertTrue(device.wait(Until.gone(By.desc(context.getString(R.string.desc_dismiss_sheet))), 5000))
     }
 
     @Test fun localSessionErrorReloadShareEndAndBack() {
@@ -127,28 +126,26 @@ class NativeJourneysTest {
         assertNotNull(device.wait(Until.findObject(By.desc(context.getString(R.string.desc_end_call))), 15000))
         assertFalse(device.hasObject(By.textContains("Live")))
         capture("room-native-controls")
-        device.findObject(By.desc(context.getString(R.string.call_more_actions))).click()
         val audio = requireNotNull(context.getSystemService(android.media.AudioManager::class.java))
         val speakerBefore = audio.mode
+        val speakerItem = overflowAction(By.text(context.getString(R.string.action_speaker)))
         capture("room-overflow")
-        requireNotNull(device.wait(Until.findObject(By.text(context.getString(R.string.action_speaker))), 5000)).click()
-        device.findObject(By.desc(context.getString(R.string.call_more_actions))).click()
+        speakerItem.click()
         assertEquals(speakerBefore, audio.mode)
-        capture("room-speaker-selected-or-pending")
         val speakerAction = java.util.regex.Pattern.compile(
             java.util.regex.Pattern.quote(context.getString(R.string.action_speaker)) + "|" +
                 java.util.regex.Pattern.quote(context.getString(R.string.action_cancel_speaker_switch)))
-        requireNotNull(device.wait(Until.findObject(By.text(speakerAction)), 5000)).click()
+        val speakerToggle = overflowAction(By.text(speakerAction))
+        capture("room-speaker-selected-or-pending")
+        speakerToggle.click()
         assertTrue(device.wait(Until.gone(By.text(speakerAction)), 5000))
         instrumentation.waitForIdleSync()
         assertEquals(speakerBefore, audio.mode)
         AuditEvidence.assertAudioClient("room-speaker-off-audio", device, false)
-        device.findObject(By.desc(context.getString(R.string.call_more_actions))).click()
-        requireNotNull(device.wait(Until.findObject(By.text(context.getString(R.string.action_speaker))), 5000)).click()
+        overflowAction(By.text(context.getString(R.string.action_speaker))).click()
         assertTrue(device.wait(Until.gone(By.text(speakerAction)), 5000))
         AuditEvidence.assertAudioClient("room-before-pip-audio", device, true)
-        device.findObject(By.desc(context.getString(R.string.call_more_actions))).click()
-        requireNotNull(device.wait(Until.findObject(By.text(context.getString(R.string.desc_pip))), 5000)).click()
+        overflowAction(By.text(context.getString(R.string.desc_pip))).click()
         assertTrue(device.wait(Until.gone(By.desc(context.getString(R.string.desc_end_call))), 5000))
         awaitPipContent("manual-pip")
         capture("room-picture-in-picture")
@@ -166,10 +163,8 @@ class NativeJourneysTest {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         })
         assertNotNull(device.wait(Until.findObject(By.desc(context.getString(R.string.desc_end_call))), 5000))
-        device.findObject(By.desc(context.getString(R.string.call_more_actions))).click()
-        requireNotNull(device.wait(Until.findObject(By.text(context.getString(R.string.desc_retry_call))), 5000)).click()
-        device.findObject(By.desc(context.getString(R.string.call_more_actions))).click()
-        requireNotNull(device.wait(Until.findObject(By.text(context.getString(R.string.action_share))), 5000)).click()
+        overflowAction(By.text(context.getString(R.string.desc_retry_call))).click()
+        overflowAction(By.text(context.getString(R.string.action_share))).click()
         assertTrue(device.wait(Until.gone(By.desc(context.getString(R.string.desc_end_call))), 5000))
         assertPip(false)
         capture("room-share-chooser")
@@ -179,8 +174,7 @@ class NativeJourneysTest {
         assertTrue(device.wait(Until.gone(By.desc(context.getString(R.string.desc_end_call))), 5000))
         shareTestLink()
         assertNotNull(device.wait(Until.findObject(By.desc(context.getString(R.string.desc_end_call))), 10000))
-        device.findObject(By.desc(context.getString(R.string.call_more_actions))).click()
-        requireNotNull(device.wait(Until.findObject(By.text(context.getString(R.string.action_speaker))), 5000)).click()
+        overflowAction(By.text(context.getString(R.string.action_speaker))).click()
         instrumentation.waitForIdleSync()
         device.pressBack()
         assertTrue(device.wait(Until.gone(By.desc(context.getString(R.string.desc_end_call))), 5000))
@@ -211,8 +205,7 @@ class NativeJourneysTest {
             val parent = caller?.parent
             if (parent is android.view.ViewGroup) parent.removeView(caller)
         }
-        device.findObject(By.desc(context.getString(R.string.call_more_actions))).click()
-        requireNotNull(device.wait(Until.findObject(By.text(context.getString(R.string.action_share))), 5000)).click()
+        overflowAction(By.text(context.getString(R.string.action_share))).click()
         assertTrue(device.wait(Until.gone(By.desc(context.getString(R.string.desc_end_call))), 5000))
         instrumentation.runOnMainSync {
             owned.last { it !in destroyed }.window.setLayout(device.displayWidth * 3 / 4, device.displayHeight * 3 / 4)
@@ -366,6 +359,22 @@ class NativeJourneysTest {
             android.os.SystemClock.sleep(50)
         }
         assertEquals("Actual activity PiP state", expected, actual)
+    }
+
+    /** A dismissing PopupMenu keeps its window briefly and can swallow the next overflow tap. */
+    private fun overflowAction(item: BySelector): UiObject2 {
+        val overflow = By.desc(context.getString(R.string.call_more_actions))
+        val deadline = android.os.SystemClock.uptimeMillis() + 5000L
+        while (android.os.SystemClock.uptimeMillis() < deadline) {
+            if (device.hasObject(item)) {
+                device.wait(Until.gone(item), 1000)
+                continue
+            }
+            device.findObject(overflow)?.click()
+            val action = device.wait(Until.findObject(item), 1000)
+            if (action != null) return action
+        }
+        throw AssertionError("Call overflow menu never presented the requested action")
     }
 
     private fun capture(name: String) = AuditEvidence.capture(name, device)

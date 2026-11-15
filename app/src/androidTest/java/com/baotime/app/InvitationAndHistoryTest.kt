@@ -1,15 +1,23 @@
 package com.baotime.app
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.core.content.edit
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
+import com.baotime.app.call.CallLifecycleState
 import com.baotime.app.call.IncomingCallListenerService
 import com.baotime.app.call.IncomingPushReceiver
-import java.io.File
+import com.baotime.app.call.SharedPreferencesPushStore
+import com.baotime.app.call.UnifiedPushRegistrar
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -18,8 +26,35 @@ import org.junit.runner.RunWith
 /** Public intent/UI routes; this does not claim live notification-service delivery. */
 @RunWith(AndroidJUnit4::class)
 class InvitationAndHistoryTest {
-    private val context = InstrumentationRegistry.getInstrumentation().targetContext
-    private val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+    private val instrumentation = InstrumentationRegistry.getInstrumentation()
+    private val context = instrumentation.targetContext
+    private val device = UiDevice.getInstance(instrumentation)
+
+    private var pushFixtureRetained = false
+    private var originalPushToken: String? = null
+    private var originalPushEndpoint: String? = null
+    private var originalHadMacGeneration = false
+    private var originalMacGeneration = -1L
+    private var originalDistributor: String? = null
+
+    @After fun restorePushFixture() {
+        if (!pushFixtureRetained) return
+        pushFixtureRetained = false
+        val app = context.applicationContext
+        require(app is BaoTimeApp)
+        val store = app.pushStore
+        require(store is SharedPreferencesPushStore)
+        val pushPrefs = app.getSharedPreferences(SharedPreferencesPushStore.PREFS_NAME, Context.MODE_PRIVATE)
+        store.clearEndpoint()
+        pushPrefs.edit(commit = true) {
+            clear()
+            if (originalPushToken != null) putString("instance_token", originalPushToken)
+            if (originalPushEndpoint != null) putString("endpoint", originalPushEndpoint)
+            if (originalHadMacGeneration) putLong("mac_generation", originalMacGeneration)
+            if (originalDistributor != null) putString("distributor_package", originalDistributor)
+        }
+        originalPushEndpoint?.let(store::saveEndpoint)
+    }
 
     @Before fun openHome() {
         assertEquals("true", InstrumentationRegistry.getArguments().getString("auditFixture"))
@@ -81,16 +116,82 @@ class InvitationAndHistoryTest {
     }
 
     @Test fun unifiedPushIngressRoutesIntoCallLifecycle() {
+        val app = context.applicationContext
+        require(app is BaoTimeApp)
+        val store = app.pushStore
+        require(store is SharedPreferencesPushStore)
+        val pushPrefs = app.getSharedPreferences(SharedPreferencesPushStore.PREFS_NAME, Context.MODE_PRIVATE)
+        originalPushToken = pushPrefs.getString("instance_token", null)
+        originalPushEndpoint = pushPrefs.getString("endpoint", null)
+        originalHadMacGeneration = pushPrefs.contains("mac_generation")
+        originalMacGeneration = pushPrefs.getLong("mac_generation", -1L)
+        originalDistributor = pushPrefs.getString("distributor_package", null)
+        pushFixtureRetained = true
         val payload = """{"type":"ft-call-status-changed","data":{"uuid":"audit-push-uuid-1","status_id":4,"status":"Incoming Call","handle":{"address":"Audit Push"}}}"""
-        context.sendBroadcast(Intent(context, IncomingPushReceiver::class.java).apply {
+        val binding = requireNotNull(store.bind(app.appConfig.macBindingGeneration(), UnifiedPushRegistrar.NTFY_PACKAGE).current)
+        deliverPushBroadcast(Intent(context, IncomingPushReceiver::class.java).apply {
+            action = IncomingPushReceiver.ACTION_UNIFIED_PUSH_NEW_ENDPOINT
+            putExtra(UnifiedPushRegistrar.EXTRA_TOKEN, binding.token)
+            putExtra(IncomingPushReceiver.EXTRA_ENDPOINT, "https://ntfy.sh/baotime-audit?up=1")
+        })
+        assertTrue(app.hasPushEndpoint())
+        assertTrue(app.pushEndpointAvailable.value)
+        deliverPushBroadcast(Intent(context, IncomingPushReceiver::class.java).apply {
             action = IncomingPushReceiver.ACTION_UNIFIED_PUSH_MESSAGE
             putExtra(IncomingPushReceiver.EXTRA_MESSAGE, payload)
         })
+        assertFalse(app.callLifecycle.state.value is CallLifecycleState.Ringing)
+        assertFalse(device.hasObject(By.text("Audit Push")))
+        assertFalse(device.hasObject(By.desc(context.getString(R.string.desc_accept_call))))
+        deliverPushBroadcast(Intent(context, IncomingPushReceiver::class.java).apply {
+            action = IncomingPushReceiver.ACTION_UNIFIED_PUSH_MESSAGE
+            putExtra(UnifiedPushRegistrar.EXTRA_TOKEN, "${binding.token}-rogue")
+            putExtra(IncomingPushReceiver.EXTRA_MESSAGE, payload)
+        })
+        assertFalse(app.callLifecycle.state.value is CallLifecycleState.Ringing)
+        assertFalse(device.hasObject(By.text("Audit Push")))
+        assertFalse(device.hasObject(By.desc(context.getString(R.string.desc_accept_call))))
+        deliverPushBroadcast(Intent(context, IncomingPushReceiver::class.java).apply {
+            action = IncomingPushReceiver.ACTION_UNIFIED_PUSH_MESSAGE
+            putExtra(UnifiedPushRegistrar.EXTRA_TOKEN, binding.token)
+            putExtra(IncomingPushReceiver.EXTRA_MESSAGE, payload)
+        })
+        assertTrue(app.callLifecycle.state.value is CallLifecycleState.Ringing)
         assertNotNull(device.wait(Until.findObject(By.text("Audit Push")), 5000))
         assertNotNull(device.wait(Until.findObject(By.desc(context.getString(R.string.desc_accept_call))), 5000))
         capture("incoming-unified-push")
         device.findObject(By.desc(context.getString(R.string.desc_decline_call))).click()
         assertTrue(device.wait(Until.gone(By.desc(context.getString(R.string.desc_accept_call))), 5000))
+        store.bind(app.appConfig.macBindingGeneration(), null)
+        assertFalse(app.hasPushEndpoint())
+        assertFalse(app.pushEndpointAvailable.value)
+        val unboundPayload = """{"type":"ft-call-status-changed","data":{"uuid":"audit-push-uuid-2","status_id":4,"status":"Incoming Call","handle":{"address":"Audit Push Unbound"}}}"""
+        deliverPushBroadcast(Intent(context, IncomingPushReceiver::class.java).apply {
+            action = IncomingPushReceiver.ACTION_UNIFIED_PUSH_MESSAGE
+            putExtra(UnifiedPushRegistrar.EXTRA_TOKEN, binding.token)
+            putExtra(IncomingPushReceiver.EXTRA_MESSAGE, unboundPayload)
+        })
+        assertFalse(app.callLifecycle.state.value is CallLifecycleState.Ringing)
+        assertFalse(device.hasObject(By.text("Audit Push Unbound")))
+    }
+
+    private fun deliverPushBroadcast(intent: Intent) {
+        val delivered = CountDownLatch(1)
+        context.sendOrderedBroadcast(
+            intent,
+            null,
+            object : BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    delivered.countDown()
+                }
+            },
+            null,
+            0,
+            null,
+            null
+        )
+        assertTrue(delivered.await(5, TimeUnit.SECONDS))
+        instrumentation.waitForIdleSync()
     }
 
     private fun invitation(id: String, title: String) {

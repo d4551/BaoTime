@@ -177,9 +177,8 @@ object UnifiedPushRegistrar {
     }
 
     internal fun isNtfyEndpoint(endpoint: String): Boolean {
-        val url = try {
-            URI(endpoint)
-        } catch (_: URISyntaxException) {
+        val url = runCatching { URI(endpoint) }.getOrElse { outcome ->
+            if (outcome !is URISyntaxException) throw outcome
             return false
         }
         return url.scheme.equals("https", ignoreCase = true) && !url.host.isNullOrBlank() &&

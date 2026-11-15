@@ -67,9 +67,12 @@ object RecentsTabUi {
                 existing
             } else {
                 val caption = Caption(theme, record)
-                val view = buildRow(theme, caption, onJoin, onCall)
-                view.setOnClickListener { onOpenDetail(caption.record) }
-                Row(view, caption)
+                val row = buildRow(theme, caption, onJoin, onCall)
+                row.primary.apply {
+                    isFocusable = true
+                    setOnClickListener { onOpenDetail(caption.record) }
+                }
+                Row(row.root, caption)
             }
         }
         available.values.forEach { unused -> unused.forEach { container.removeView(it.view) } }
@@ -105,7 +108,7 @@ object RecentsTabUi {
         caption: Caption,
         onJoin: (BaoCallRecord) -> Unit,
         onCall: (BaoCallRecord) -> Unit
-    ): View {
+    ): BaoTimeComponents.ListRow {
         val record = caption.record
         val hasLink = record.faceTimeUrl != null
         val actions = listOf(
@@ -119,10 +122,10 @@ object RecentsTabUi {
             }
         )
         val title = record.handleOrNumber.ifBlank { record.displayName }
-        val (badgeIcon, badgeDesc) = when (record.callType) {
-            BaoCallRecord.TYPE_OUTGOING -> R.drawable.ic_call_outgoing to R.string.call_type_outgoing
-            BaoCallRecord.TYPE_MISSED -> R.drawable.ic_call_missed to R.string.call_type_missed
-            else -> R.drawable.ic_call_incoming to R.string.call_type_incoming
+        val badgeIcon = when (record.callType) {
+            BaoCallRecord.TYPE_OUTGOING -> R.drawable.ic_call_outgoing
+            BaoCallRecord.TYPE_MISSED -> R.drawable.ic_call_missed
+            else -> R.drawable.ic_call_incoming
         }
         return BaoTimeComponents.listRow(
             theme = theme,
@@ -136,9 +139,8 @@ object RecentsTabUi {
             } else {
                 theme.colorTextSecondary
             },
-            badgeDescriptionRes = badgeDesc,
             showChevron = true
-        ).root
+        )
     }
 
     private fun describe(context: Context, record: BaoCallRecord, detail: Boolean): String {

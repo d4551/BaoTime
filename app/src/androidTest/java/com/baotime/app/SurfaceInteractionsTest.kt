@@ -1,17 +1,22 @@
 package com.baotime.app
 
+import android.content.Context
 import android.content.Intent
 import android.graphics.Point
+import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import androidx.core.content.edit
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
-import java.io.File
+import com.baotime.app.call.SharedPreferencesPushStore
+import com.baotime.app.config.AppConfig
+import com.baotime.app.config.PasswordRead
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -22,16 +27,82 @@ class SurfaceInteractionsTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
     private val device = UiDevice.getInstance(instrumentation)
+    private val preferences = context.getSharedPreferences(AppConfig.PREFS_NAME, Context.MODE_PRIVATE)
+    private val pushPreferences = context.getSharedPreferences(SharedPreferencesPushStore.PREFS_NAME, Context.MODE_PRIVATE)
 
+    private var fixtureRetained = false
     private var originalScale = "1.0"
+    private var originalRevision = 0L
+    private var originalServerUrl = ""
+    private var originalPassword: PasswordRead = PasswordRead.Missing
+    private var originalRawPassword: String? = null
+    private var originalPushToken: String? = null
+    private var originalPushEndpoint: String? = null
+    private var originalHadPushMac = false
+    private var originalPushDistributor: String? = null
 
     @org.junit.After fun restoreScale() {
+        if (!fixtureRetained) return
+        val app = context.applicationContext
+        require(app is BaoTimeApp)
+        val store = app.pushStore
+        require(store is SharedPreferencesPushStore)
+        if (app.appConfig.connectionRevision() != originalRevision) {
+            when (val stored = originalPassword) {
+                is PasswordRead.Available -> app.appConfig.saveConnection(originalServerUrl, stored.value)
+                PasswordRead.Missing -> {
+                    app.appConfig.saveConnection(originalServerUrl, "")
+                    if (originalRawPassword == null) {
+                        preferences.edit(commit = true) { remove(AppConfig.KEY_SERVER_PASSWORD) }
+                    }
+                }
+                is PasswordRead.Unavailable -> {
+                    app.appConfig.saveConnection(originalServerUrl, "")
+                    preferences.edit(commit = true) {
+                        if (originalRawPassword == null) remove(AppConfig.KEY_SERVER_PASSWORD)
+                        else putString(AppConfig.KEY_SERVER_PASSWORD, originalRawPassword)
+                    }
+                }
+            }
+            val targetRevision = app.appConfig.connectionRevision()
+            val targetMac = app.appConfig.macBindingGeneration()
+            val deadline = SystemClock.uptimeMillis() + 5000L
+            while ((app.callLifecycle.configGeneration != targetRevision ||
+                    pushPreferences.getLong("mac_generation", -1L) != targetMac) &&
+                SystemClock.uptimeMillis() < deadline
+            ) {
+                SystemClock.sleep(25)
+            }
+            assertEquals(targetRevision, app.callLifecycle.configGeneration)
+            assertEquals(targetMac, pushPreferences.getLong("mac_generation", -1L))
+            store.clearEndpoint()
+            pushPreferences.edit(commit = true) {
+                clear()
+                if (originalPushToken != null) putString("instance_token", originalPushToken)
+                if (originalPushEndpoint != null) putString("endpoint", originalPushEndpoint)
+                if (originalHadPushMac) putLong("mac_generation", targetMac)
+                if (originalPushDistributor != null) putString("distributor_package", originalPushDistributor)
+            }
+            originalPushEndpoint?.let(store::saveEndpoint)
+        }
         device.executeShellCommand("settings put system font_scale $originalScale")
     }
 
     @Before fun launch() {
-        originalScale = device.executeShellCommand("settings get system font_scale").trim()
         assertEquals("true", InstrumentationRegistry.getArguments().getString("auditFixture"))
+        originalScale = device.executeShellCommand("settings get system font_scale").trim()
+        val app = context.applicationContext
+        require(app is BaoTimeApp)
+        val snapshot = app.appConfig.connection()
+        originalRevision = snapshot.revision
+        originalServerUrl = snapshot.url
+        originalPassword = snapshot.password
+        originalRawPassword = preferences.getString(AppConfig.KEY_SERVER_PASSWORD, null)
+        originalPushToken = pushPreferences.getString("instance_token", null)
+        originalPushEndpoint = pushPreferences.getString("endpoint", null)
+        originalHadPushMac = pushPreferences.contains("mac_generation")
+        originalPushDistributor = pushPreferences.getString("distributor_package", null)
+        fixtureRetained = true
         context.startActivity(requireNotNull(context.packageManager.getLaunchIntentForPackage(context.packageName)).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         })

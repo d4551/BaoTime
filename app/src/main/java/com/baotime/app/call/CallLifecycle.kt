@@ -1,6 +1,7 @@
 package com.baotime.app.call
 
 import com.baotime.app.network.FaceTimeSessionResult
+import com.baotime.app.network.IncomingFaceTimeEvent
 import com.baotime.app.network.ServerFailure
 import com.baotime.app.routing.UrlRouter
 import kotlinx.coroutines.CoroutineScope
@@ -49,7 +50,7 @@ class CallLifecycle(
     }, onMissedInvite, onAnswerFailed)
 
     private val lock = StateMonitor()
-    private class StateMonitor
+    internal class StateMonitor
     private val inviteCounter = AtomicLong(0L)
     private var pendingOpening: Long? = null
     private var currentConfigGeneration: Long = initialConfigGeneration
@@ -64,89 +65,50 @@ class CallLifecycle(
     val configGeneration: Long
         get() = synchronized(lock) { currentConfigGeneration }
 
+    // Intake algorithm collaborator. The shared-state contract is defined ONCE on InviteIntake.Core
+    // and referenced here; all state and locked helpers remain owned by this store.
+    private val intake = InviteIntake(object : InviteIntake.Core {
+        override val lock: StateMonitor get() = this@CallLifecycle.lock
+        override fun generationLocked(): Long = currentConfigGeneration
+        override fun stateLocked(): CallLifecycleState = _state.value
+        override fun isTerminalUuidLocked(uuid: String): Boolean = uuid in terminalUuids
+        override fun activeInviteLocked(): CallInvite? = this@CallLifecycle.activeInviteLocked()
+        override fun nextInviteGenerationLocked(): Long = inviteCounter.incrementAndGet()
+        override fun displaceAndRingLocked(next: CallInvite, active: CallInvite?, markTerminal: Boolean): CallInvite? =
+            this@CallLifecycle.displaceAndRingLocked(next, active, markTerminal)
+        override fun leaveInvite(invite: CallInvite) = this@CallLifecycle.leaveInvite(invite)
+        override fun notifyMissed(invite: CallInvite, reason: TerminalReason) {
+            launchBestEffort { onMissedInvite(invite, reason) }
+        }
+    })
+
+    private val incomingEvents = IncomingEventRouter(this)
+
+    /**
+     * Shared ingress for parsed socket/push FaceTime events. [IncomingEventRouter] owns the
+     * INCOMING/DISCONNECTED/legacy switch; transports only parse payloads and call this entry.
+     */
+    fun onIncomingEvent(
+        event: IncomingFaceTimeEvent,
+        configGeneration: Long = this.configGeneration,
+        source: InviteSource,
+        uiEnabled: Boolean = false
+    ): Boolean = incomingEvents.onIncomingEvent(event, configGeneration, source, uiEnabled)
+
     /** Handles a calling-mode incoming event carrying a non-null [callUuid] (`status_id == 4`). */
     fun onIncomingUuid(
         callUuid: String,
         caller: String,
         configGeneration: Long = this.configGeneration,
         source: InviteSource = InviteSource.SocketCalling
-    ): Boolean {
-        val cleanUuid = callUuid.trim()
-        if (cleanUuid.isEmpty()) return false
-        var displacedInvite: CallInvite? = null
-        var displacedWasAnswering = false
-        val accepted: CallInvite? = synchronized(lock) {
-            if (configGeneration != currentConfigGeneration || cleanUuid in terminalUuids || roomOwnsLifecycleLocked()) return false
-            val active = activeInviteLocked()
-            if (active != null && active.callUuid == cleanUuid) return false
-            if (active != null) {
-                rememberTerminalUuidLocked(active.callUuid)
-                displacedInvite = active
-                displacedWasAnswering = _state.value is CallLifecycleState.Answering
-                cancelActiveJobsLocked()
-            }
-            val next = CallInvite(
-                callUuid = cleanUuid,
-                faceTimeUrl = null,
-                caller = caller.trim(),
-                configGeneration = configGeneration,
-                inviteGeneration = inviteCounter.incrementAndGet(),
-                source = source
-            )
-            pendingOpening = null
-            _state.value = CallLifecycleState.Ringing(next)
-            startExpiryLocked(next)
-            next
-        }
-        displacedInvite?.let { previous ->
-            val prevUuid = previous.callUuid
-            if (prevUuid != cleanUuid) leaveInvite(previous)
-            val reason = if (displacedWasAnswering) TerminalReason.Disconnected else TerminalReason.Missed
-            launchBestEffort { onMissedInvite(previous, reason) }
-        }
-        return accepted != null
-    }
+    ): Boolean = intake.onIncomingUuid(callUuid, caller, configGeneration, source)
 
     /** Handles an NLS URL-only incoming invitation (`IncomingCallListenerService`), kept separate from socket UUIDs. */
     fun onIncomingNlsUrl(
         faceTimeUrl: String,
         caller: String,
         configGeneration: Long = this.configGeneration
-    ): Boolean {
-        val cleanUrl = UrlRouter.extractFaceTimeUrl(faceTimeUrl) ?: return false
-        var displacedInvite: CallInvite? = null
-        val accepted: CallInvite? = synchronized(lock) {
-            if (configGeneration != currentConfigGeneration || roomOwnsLifecycleLocked()) return false
-            val current = _state.value
-            val active = activeInviteLocked()
-            if (active != null && active.source == InviteSource.NlsUrl && active.faceTimeUrl == cleanUrl) return false
-            if ((current is CallLifecycleState.Ringing || current is CallLifecycleState.Answering) && active?.callUuid != null) {
-                return false
-            }
-            if (active != null) {
-                rememberTerminalUuidLocked(active.callUuid)
-                displacedInvite = active
-                cancelActiveJobsLocked()
-            }
-            val next = CallInvite(
-                callUuid = null,
-                faceTimeUrl = cleanUrl,
-                caller = caller.trim(),
-                configGeneration = configGeneration,
-                inviteGeneration = inviteCounter.incrementAndGet(),
-                source = InviteSource.NlsUrl
-            )
-            pendingOpening = null
-            _state.value = CallLifecycleState.Ringing(next)
-            startExpiryLocked(next)
-            next
-        }
-        displacedInvite?.let { previous ->
-            leaveInvite(previous)
-            launchBestEffort { onMissedInvite(previous, TerminalReason.Declined) }
-        }
-        return accepted != null
-    }
+    ): Boolean = intake.onIncomingNlsUrl(faceTimeUrl, caller, configGeneration)
 
     /** Handles a legacy `incoming-facetime` event (no `callUuid`, no `faceTimeUrl`); never calls `/facetime/answer`. */
     fun onIncomingLegacy(
@@ -154,41 +116,7 @@ class CallLifecycle(
         timestampMs: Long?,
         configGeneration: Long = this.configGeneration,
         uiEnabled: Boolean = false
-    ): Boolean {
-        val cleanCaller = caller.trim()
-        var displacedInvite: CallInvite? = null
-        synchronized(lock) {
-            if (configGeneration != currentConfigGeneration || roomOwnsLifecycleLocked()) return false
-            val active = activeInviteLocked()
-            if (active != null && active.source == InviteSource.SocketLegacy &&
-                active.caller == cleanCaller && active.legacyTimestampMs == timestampMs
-            ) {
-                return false
-            }
-            if (!uiEnabled || _state.value is CallLifecycleState.Ringing || _state.value is CallLifecycleState.Answering) {
-                return false
-            }
-            displacedInvite = active
-            cancelActiveJobsLocked()
-            val next = CallInvite(
-                callUuid = null,
-                faceTimeUrl = null,
-                caller = cleanCaller,
-                configGeneration = configGeneration,
-                inviteGeneration = inviteCounter.incrementAndGet(),
-                source = InviteSource.SocketLegacy,
-                legacyTimestampMs = timestampMs
-            )
-            pendingOpening = null
-            _state.value = CallLifecycleState.Ringing(next)
-            startExpiryLocked(next)
-        }
-        displacedInvite?.let { previous ->
-            leaveInvite(previous)
-            launchBestEffort { onMissedInvite(previous, TerminalReason.Declined) }
-        }
-        return true
-    }
+    ): Boolean = intake.onIncomingLegacy(caller, timestampMs, configGeneration, uiEnabled)
 
     /** User tapped Accept on the currently ringing invitation. */
     @JvmOverloads
@@ -488,6 +416,24 @@ class CallLifecycle(
         launchBestEffort { signaling.leave(uuid, invite.configGeneration) }
     }
 
+    /**
+     * Shared intake core: displaces any active invite, then rings [next]. Callers hold [lock] and
+     * run their own dedupe guards before calling; the displaced invite is returned so the caller
+     * can fire leave/missed callbacks OUTSIDE the lock. [markTerminal] records the displaced UUID
+     * as terminal for UUID/NLS intake; legacy intake passes false because a legacy event never
+     * terminal-marks the invite it displaces.
+     */
+    private fun displaceAndRingLocked(next: CallInvite, active: CallInvite?, markTerminal: Boolean = true): CallInvite? {
+        if (active != null) {
+            if (markTerminal) rememberTerminalUuidLocked(active.callUuid)
+            cancelActiveJobsLocked()
+        }
+        pendingOpening = null
+        _state.value = CallLifecycleState.Ringing(next)
+        startExpiryLocked(next)
+        return active
+    }
+
     private fun startExpiryLocked(invite: CallInvite) {
         expiryJob?.cancel()
         if (ringingTimeoutMs <= 0L) return
@@ -510,8 +456,6 @@ class CallLifecycle(
         leaveInvite(expired)
         launchBestEffort { onMissedInvite(expired, TerminalReason.Expired) }
     }
-
-    private fun roomOwnsLifecycleLocked(): Boolean = _state.value is CallLifecycleState.InRoom
 
     private fun rememberTerminalUuidLocked(uuid: String?) {
         if (uuid == null || !terminalUuids.add(uuid)) return

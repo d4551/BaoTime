@@ -44,14 +44,9 @@ class BlueBubblesClientTest {
         )
     }
 
-    private fun readFixture(path: String): String =
-        checkNotNull(javaClass.classLoader?.getResourceAsStream(path)) {
-            "Missing fixture $path"
-        }.bufferedReader().use { it.readText() }
-
     @Test
     fun `pingServer classifies 200 pong as Authenticated and 401 as Unauthorized`() = runBlocking {
-        val fixture = readFixture("bluebubbles/ping.json")
+        val fixture = BlueBubblesFixtures.read("ping.json")
         server.enqueue(MockResponse().setResponseCode(200).setBody(fixture))
         server.enqueue(MockResponse().setResponseCode(401).setBody("""{"status":401,"message":"Unauthorized"}"""))
 
@@ -119,7 +114,7 @@ class BlueBubblesClientTest {
 
     @Test
     fun `createFaceTimeSession validates FaceTime room URL and rejects root or non-Apple link`() = runBlocking {
-        val helperOn = readFixture("bluebubbles/server-info-helper-on.json")
+        val helperOn = BlueBubblesFixtures.read("server-info-helper-on.json")
         server.enqueue(MockResponse().setResponseCode(200).setBody(helperOn))
         server.enqueue(
             MockResponse().setResponseCode(200).setBody(

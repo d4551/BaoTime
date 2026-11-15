@@ -1,14 +1,18 @@
 package com.baotime.app
 
+import android.Manifest
 import android.app.Activity
 import android.app.Application
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.webkit.WebView
 import com.baotime.app.call.CallInvite
 import com.baotime.app.call.CallLifecycle
 import com.baotime.app.call.CallLifecycleState
 import com.baotime.app.call.CallSignaling
+import com.baotime.app.call.IncomingCallListenerService
 import com.baotime.app.call.IncomingCallNotifications
 import com.baotime.app.call.PushRegistrationStore
 import com.baotime.app.call.SharedPreferencesPushStore
@@ -18,12 +22,18 @@ import com.baotime.app.config.PasswordRead
 import com.baotime.app.data.CallHistory
 import com.baotime.app.data.ContactsRepository
 import com.baotime.app.network.BlueBubblesClient
+import com.baotime.app.network.BlueBubblesServerStatus
 import com.baotime.app.network.BlueBubblesSocket
 import com.baotime.app.network.EndpointSnapshot
+import com.baotime.app.network.ServerCapability
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -54,6 +64,8 @@ class BaoTimeApp : Application() {
     val callHistory: CallHistory by lazy { CallHistory(this) }
     val contactsRepository: ContactsRepository by lazy { ContactsRepository(this) }
     val bbClient: BlueBubblesClient by lazy { BlueBubblesClient(appConfig) }
+    internal val serverBanner: ServerBannerCoordinator by lazy { ServerBannerCoordinator() }
+    internal val permissionConsent: PermissionConsent by lazy { PermissionConsent() }
 
     private val startedActivities = AtomicInteger(0)
     private var lastNotifiedInviteGeneration = -1L
@@ -222,4 +234,96 @@ class BaoTimeApp : Application() {
             url = invite.faceTimeUrl
         )
     }
+
+    /**
+     * Revision-gated server banner orchestration. Chrome binds [ServerBanner] tones to theme
+     * color tokens; outgoing-call presentation stays with the Activity's call-link controller.
+     */
+    internal inner class ServerBannerCoordinator {
+        val state: StateFlow<ServerBanner> by lazy {
+            appConfig.connectionRevisions.combine(bbClient.serverStatuses) { _, _ -> current() }
+                .stateIn(applicationScope, SharingStarted.WhileSubscribed(), current())
+        }
+
+        /** Re-verifies a saved server and returns the observation for the committed revision. */
+        suspend fun onConfigSaved(cancelOutgoing: () -> Unit): BlueBubblesServerStatus {
+            cancelOutgoing()
+            val status = bbClient.checkServerStatus()
+            return currentStatus() ?: status
+        }
+
+        private fun current(): ServerBanner {
+            val status = currentStatus()
+            return when {
+                status == null -> ServerBanner(R.string.banner_checking, ServerBanner.Tone.Checking)
+                status.isFaceTimeCapable -> ServerBanner(R.string.banner_connected, ServerBanner.Tone.Connected)
+                else -> ServerBanner(ServerCapability.bannerResource(status.failure), ServerBanner.Tone.Fault)
+            }
+        }
+
+        private fun currentStatus(): BlueBubblesServerStatus? =
+            bbClient.serverStatuses.value?.takeIf { it.revision == appConfig.connectionRevision() }?.status
+    }
+
+    /**
+     * Notification-consent decisions and the persisted blocked flag, owned process-wide.
+     * The Activity keeps the result launchers, the rationale probe and the settings jump,
+     * which require an Activity context.
+     */
+    internal inner class PermissionConsent {
+        private var notificationRequested = false
+
+        fun restoreNotificationRequested(requested: Boolean) {
+            notificationRequested = requested
+        }
+
+        fun notificationRequested(): Boolean = notificationRequested
+
+        /** Persists permanent denial; a shown rationale means the user can still be asked. */
+        fun onNotificationResult(granted: Boolean, showRationale: () -> Boolean) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                appConfig.setNotificationPermissionBlocked(!granted && !showRationale())
+            }
+        }
+
+        /** Clears a stale blocked flag once the grant exists (user enabled notifications in settings). */
+        fun syncBlockedFlag() {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED &&
+                appConfig.notificationPermissionBlocked()
+            ) {
+                appConfig.setNotificationPermissionBlocked(false)
+            }
+        }
+
+        fun requestNotification(showRationale: () -> Boolean, requestConsent: (() -> Unit) -> Boolean, launch: () -> Unit) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !notificationRequested &&
+                canRequestNotification(showRationale) &&
+                IncomingCallListenerService.hasNotificationAccess(this@BaoTimeApp) &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+                requestConsent(launch)
+            ) {
+                notificationRequested = true
+            }
+        }
+
+        /** True when consent sequencing handled the alert-controls request; false opens system settings. */
+        fun requestCallAlertConsent(showRationale: () -> Boolean, requestConsent: (() -> Unit) -> Boolean, launch: () -> Unit): Boolean {
+            val permissionDenied = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            if (permissionDenied && canRequestNotification(showRationale)) {
+                if (requestConsent(launch)) notificationRequested = true
+                return true
+            }
+            return false
+        }
+
+        private fun canRequestNotification(showRationale: () -> Boolean): Boolean =
+            !appConfig.notificationPermissionBlocked() || showRationale()
+    }
+}
+
+/** Server-banner presentation; chrome maps each tone to its theme color token. */
+internal data class ServerBanner(val messageRes: Int, val tone: Tone) {
+    enum class Tone { Checking, Connected, Fault }
 }

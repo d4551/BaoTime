@@ -92,8 +92,7 @@ object ForegroundSurface {
             }
             surfaces.add(surface)
             applyTop()
-            surface.entry.isFocusableInTouchMode = true
-            surface.entry.requestFocus()
+            if (!surface.entry.isInTouchMode) surface.entry.requestFocus()
         }
 
         fun remove(surface: Surface) {
@@ -105,7 +104,10 @@ object ForegroundSurface {
                 originals.forEach { (view, original) -> original.restore(view) }
                 host.setTag(R.id.foreground_surface_state, null)
                 if (previousFocus?.isAttachedToWindow == true) previousFocus.requestFocus()
-            } else surfaces.last().entry.requestFocus()
+            } else {
+                val next = surfaces.last().entry
+                if (!next.isInTouchMode) next.requestFocus()
+            }
         }
 
         private fun applyTop() {
@@ -114,6 +116,7 @@ object ForegroundSurface {
             originals.forEach { (view, original) ->
                 if (top == null || view === top.root) original.restore(view)
                 else {
+                    if (view.hasFocus()) view.clearFocus()
                     view.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
                     if (view is ViewGroup) view.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
                 }

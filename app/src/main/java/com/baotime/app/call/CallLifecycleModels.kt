@@ -17,7 +17,7 @@ enum class InviteSource {
  * to a single invite. Cross-source NLS URL-only ([InviteSource.NlsUrl], which has [faceTimeUrl]
  * and no [callUuid]) and Socket/Push calling ([InviteSource.SocketCalling] / [InviteSource.Fcm],
  * which have [callUuid] and no [faceTimeUrl]) are strictly separate identities and are never
- * merged by time, proximity, or caller-window (`tasks/plan.md` Call lifecycle contract).
+ * merged by time, proximity, or caller-window.
  */
 data class CallInvite(
     val callUuid: String?,

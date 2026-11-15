@@ -56,9 +56,7 @@ class FaceTimeAvailabilityTest {
 
     @Test
     fun unavailableOr500Handle_doesNotBlockCreateFaceTimeSession() = runBlocking {
-        val helperOn = checkNotNull(javaClass.classLoader?.getResourceAsStream("bluebubbles/server-info-helper-on.json")) {
-            "Missing bluebubbles/server-info-helper-on.json"
-        }.bufferedReader().use { it.readText() }
+        val helperOn = BlueBubblesFixtures.read("server-info-helper-on.json")
         // 1. Availability returns false (Unavailable)
         server.enqueue(MockResponse().setResponseCode(200).setBody("""{"status":200,"data":{"available":false}}"""))
         // 2. Capability preflight for revision 1L + Create session still succeeds (`facetimeRouter.ts` @ `76d2b2e` takes `{}` with no callee)

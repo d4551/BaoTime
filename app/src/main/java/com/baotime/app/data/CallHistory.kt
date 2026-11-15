@@ -134,9 +134,8 @@ class CallHistory(context: Context) {
         else -> throw JSONException("Call history preference is not text")
     }
 
-    private fun readableRecords(): List<BaoCallRecord>? = try {
-        decodedRecords()
-    } catch (_: JSONException) {
+    private fun readableRecords(): List<BaoCallRecord>? = runCatching { decodedRecords() }.getOrElse { outcome ->
+        if (outcome !is JSONException) throw outcome
         null
     }
 

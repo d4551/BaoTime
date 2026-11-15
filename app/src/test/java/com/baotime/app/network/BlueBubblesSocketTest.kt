@@ -28,26 +28,6 @@ class BlueBubblesSocketTest {
         scope.cancel()
     }
 
-    private class FakeSocketEngine(val listener: SocketEngineListener) : SocketEngine {
-        var connected = false
-        var closed = false
-
-        override fun connect() {
-            connected = true
-            listener.onConnect()
-        }
-
-        override fun disconnect() {
-            connected = false
-            listener.onDisconnect()
-        }
-
-        override fun close() {
-            connected = false
-            closed = true
-        }
-    }
-
     @Test
     fun ensureConnected_createsOneSocketPerConfigGenerationAndDropsOldOnSave() {
         var currentRevision = 1L

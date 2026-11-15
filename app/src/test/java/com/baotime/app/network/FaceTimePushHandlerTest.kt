@@ -102,9 +102,7 @@ class FaceTimePushHandlerTest {
 
     @Test
     fun pushUuidUsesSameAnswerPathAsTask6AndCollapsesSameUuidWithSocket() = runBlocking {
-        val helperOn = checkNotNull(javaClass.classLoader?.getResourceAsStream("bluebubbles/server-info-helper-on.json")) {
-            "Missing bluebubbles/server-info-helper-on.json"
-        }.bufferedReader().use { it.readText() }
+        val helperOn = BlueBubblesFixtures.read("server-info-helper-on.json")
         server.enqueue(MockResponse().setResponseCode(200).setBody(helperOn))
         server.enqueue(
             MockResponse().setResponseCode(200).setBody(

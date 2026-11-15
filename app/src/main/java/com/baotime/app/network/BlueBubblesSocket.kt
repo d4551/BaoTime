@@ -257,21 +257,7 @@ class BlueBubblesSocket(
                 val parsed = IncomingFaceTimeParser.parseCallStatusChanged(payload) ?: return
                 lock.withLock {
                     if (activeAttempt != attempt) return
-                    when (parsed.status) {
-                        FaceTimeSessionStatus.INCOMING -> callLifecycle.onIncomingUuid(
-                            callUuid = parsed.uuid,
-                            caller = parsed.address.orEmpty(),
-                            configGeneration = generation,
-                            source = InviteSource.SocketCalling
-                        )
-                        FaceTimeSessionStatus.DISCONNECTED -> callLifecycle.onCallDisconnected(
-                            callUuid = parsed.uuid,
-                            configGeneration = generation
-                        )
-                        FaceTimeSessionStatus.UNKNOWN,
-                        FaceTimeSessionStatus.ANSWERED,
-                        FaceTimeSessionStatus.OUTGOING -> Unit
-                    }
+                    callLifecycle.onIncomingEvent(parsed, generation, InviteSource.SocketCalling)
                 }
             }
 
@@ -279,11 +265,7 @@ class BlueBubblesSocket(
                 val parsed = IncomingFaceTimeParser.parseLegacyIncoming(payload) ?: return
                 lock.withLock {
                     if (activeAttempt != attempt) return
-                    callLifecycle.onIncomingLegacy(
-                        caller = parsed.caller.orEmpty(),
-                        timestampMs = parsed.timestampMs,
-                        configGeneration = generation
-                    )
+                    callLifecycle.onIncomingEvent(parsed, generation, InviteSource.SocketLegacy)
                 }
             }
         }
