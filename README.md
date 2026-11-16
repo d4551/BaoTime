@@ -45,8 +45,6 @@ BaoTime is an Android app for joining FaceTime web rooms, creating shareable lin
 
 BaoTime opens one room at a time in an embedded Android WebView and offers picture-in-picture. If the room fails to load or media access fails, copy the link and open it in the latest Chrome or Edge, the browsers Apple documents for FaceTime on Android. [Apple’s FaceTime web guide](https://support.apple.com/en-us/109364)
 
-Local emulator audits verify native UI, closed/unavailable Apple room screens, and Apple’s Terms modal inside the gated WebView; live two-way Apple-host FaceTime room admission and audio/video verification require an external Apple host and remain **`NOT RUN`** / externally blocked here.
-
 ## Connect to your Mac
 
 1. Run BlueBubbles Server **1.9.12** on a Mac signed in to FaceTime. Creating and answering calls through the server requires **Private API** enabled and the FaceTime helper connected. [Server 1.9.12](https://github.com/BlueBubblesApp/bluebubbles-server/releases/tag/v1.9.12) · [Private API setup](https://docs.bluebubbles.app/private-api/installation)
