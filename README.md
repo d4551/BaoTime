@@ -124,18 +124,6 @@ For [instrumented tests](app/src/androidTest/java/com/baotime/app/), select test
 | `InstalledLauncherTest` | `installationCheck=true` and `evidenceRun` |
 | `DeviceConnectionCheckTest` | Xiaomi deployment device, `deploymentCheck=true`, and `expectedServer` matching the Tailscale HTTPS URL in the local `filesDir/deployment-connection-input.json` fixture (**`NOT RUN`** in local emulator audits without that hardware) |
 
-### Verification status
-
-The local audit on 2026-11-17 passed 72 JVM tests, 59 native journeys, the launcher check, 17 Python regression tests, 16 axe runner regression tests, and 693 design checks.
-
-- **WebView accessibility** — Both axe scans reported zero violations on the unavailable-room screen. The full-catalog scan flagged one Apple-rendered hidden button for manual review. [axe hidden-content rule](https://dequeuniversity.com/rules/axe/4.14/hidden-content)
-- **Emulator visuals** — Android status icons appeared clipped in the isolated API 35 room captures. The cause remains unverified.
-- **Live FaceTime** — Apple-host room admission and two-way audio and video remain **NOT RUN**. A live test needs an Apple host and an Android participant.
-- **Deployment** — The Xiaomi and Tailscale connection check remains **NOT RUN** in the emulator audit. It needs the deployment device and a reachable configured Mac.
-- **Source audit coverage** — Kotlin and Gradle inputs, including the wrapper JAR, are outside the remote scanner's coverage. The Android build, lint, JVM and native checks provide separate evidence for those surfaces.
-- **Android Lint** — The UnifiedPush receiver retains the `ExportedReceiver` warning. It receives distributor broadcasts and checks the current connector token before accepting a callback.
-- **Project license** — BaoTime's project license is unspecified. The [third-party notices](NOTICE) document upstream components.
-
 ## Architecture
 
 ### System overview
