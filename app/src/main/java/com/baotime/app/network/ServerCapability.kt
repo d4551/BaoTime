@@ -11,30 +11,16 @@ import com.baotime.app.R
  */
 object ServerCapability {
 
-    const val PINNED_SERVER_VERSION = "1.9.12"
-
-    data class SemVer(val major: Int, val minor: Int, val patch: Int, val suffix: String = "")
-
-    private val SEMVER_REGEX = Regex("""^[vV]?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$""")
-
-    /** Defensively parses a version string without throwing on unknown or malformed input. */
-    fun parseVersion(raw: String?): SemVer? {
-        if (raw.isNullOrBlank()) return null
-        val trimmed = raw.trim()
-        val match = SEMVER_REGEX.matchEntire(trimmed) ?: return null
-        val major = match.groupValues[1].toIntOrNull() ?: return null
-        val minor = match.groupValues[2].toIntOrNull() ?: return null
-        val patch = match.groupValues[3].toIntOrNull() ?: return null
-        val core = "${match.groupValues[1]}.${match.groupValues[2]}.${match.groupValues[3]}"
-        val normalized = trimmed.removePrefix("v").removePrefix("V")
-        val suffix = normalized.removePrefix(core)
-        return SemVer(major, minor, patch, suffix)
-    }
+    private const val PINNED_SERVER_VERSION = "1.9.12"
 
     /** Returns true only for the pinned supported baseline version `1.9.12`. */
     fun isSupportedVersion(raw: String?): Boolean {
-        val parsed = parseVersion(raw) ?: return false
-        return parsed.major == 1 && parsed.minor == 9 && parsed.patch == 12 && parsed.suffix.isEmpty()
+        val version = raw?.trim() ?: return false
+        val normalized = when (version.firstOrNull()) {
+            'v', 'V' -> version.drop(1)
+            else -> version
+        }
+        return normalized == PINNED_SERVER_VERSION
     }
 
     /**

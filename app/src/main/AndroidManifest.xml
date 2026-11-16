@@ -98,6 +98,11 @@
             </intent-filter>
         </activity>
 
+        <activity-alias
+            android:name=".IncomingCallNotification"
+            android:exported="false"
+            android:targetActivity=".MainActivity" />
+
         <!-- Auto-opens the native call surface for BlueBubbles/Beeper FaceTime alerts -->
         <service
             android:name=".call.IncomingCallListenerService"

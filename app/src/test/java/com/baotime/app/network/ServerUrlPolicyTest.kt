@@ -70,4 +70,12 @@ class ServerUrlPolicyTest {
         assertTrue(invalidReason("https://").contains("http"))
         assertTrue(invalidReason("http:///path").contains("host"))
     }
+
+    @Test
+    fun check_rejectsInvalidExplicitPorts() {
+        for (authority in listOf("mac.local:", "mac.local:0", "mac.local:65536", "[::1]:65536")) {
+            assertEquals("port must be between 1 and 65535", invalidReason("https://$authority"))
+        }
+        assertEquals(Verdict.Valid("mac.local"), ServerUrlPolicy.check("https://mac.local:65535"))
+    }
 }

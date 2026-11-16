@@ -1,7 +1,9 @@
 package com.baotime.app
 
-import android.content.Intent
+import android.Manifest
 import android.app.Activity
+import android.content.Intent
+import android.content.pm.PackageManager
 import androidx.test.runner.lifecycle.ActivityLifecycleCallback
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
@@ -87,6 +89,8 @@ class NativeJourneysTest {
     }
 
     @Test fun tabsDeniedContactsAndClearHistoryCancel() {
+        assertEquals("The contacts fixture must start without permission", PackageManager.PERMISSION_DENIED,
+            context.checkSelfPermission(Manifest.permission.READ_CONTACTS))
         shareTestLink()
         assertNotNull(device.wait(Until.findObject(By.desc(context.getString(R.string.desc_end_call))), 10000))
         device.findObject(By.desc(context.getString(R.string.desc_end_call))).click()
@@ -96,6 +100,8 @@ class NativeJourneysTest {
             val deny = device.wait(Until.findObject(By.res("com.android.permissioncontroller:id/permission_deny_button")), 1000)
             deny?.click()
             assertNotNull(device.wait(Until.findObject(By.text("Search contacts")), 5000))
+            assertNotNull(device.wait(Until.findObject(By.text(context.getString(R.string.contacts_denied))), 5000))
+            assertEquals(PackageManager.PERMISSION_DENIED, context.checkSelfPermission(Manifest.permission.READ_CONTACTS))
             capture("contacts-$it")
             requireNotNull(device.wait(Until.findObject(By.textStartsWith("Recents").clazz("android.widget.Button")), 5000)).click()
             assertNotNull(device.wait(Until.findObject(By.desc("Clear History")), 5000))

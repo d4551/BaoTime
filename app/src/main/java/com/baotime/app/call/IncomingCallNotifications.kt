@@ -4,13 +4,14 @@ import android.Manifest
 import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.net.toUri
-import com.baotime.app.MainActivity
 import com.baotime.app.R
+import com.baotime.app.routing.UrlRouter
 import com.baotime.app.system.SystemIntegration
 import java.security.MessageDigest
 
@@ -27,7 +28,12 @@ import java.security.MessageDigest
 object IncomingCallNotifications {
 
     private const val CALL_NOTIFICATION_ID = 1
+    internal const val EXTRA_CALL_UUID = "com.baotime.app.extra.PUSH_CALL_UUID"
     private val activeNotificationTags = mutableSetOf<String>()
+
+    // An explicit, non-exported alias lets a notification open the existing MainActivity task.
+    internal fun notificationEntry(context: Context): ComponentName =
+        ComponentName(context, "${context.packageName}.IncomingCallNotification")
 
     /** Posts a `CATEGORY_CALL` incoming notification for a UUID-backed Socket.IO or UnifiedPush call. */
     @JvmOverloads
@@ -36,12 +42,9 @@ object IncomingCallNotifications {
         val cleanUuid = callUuid.trim()
         if (cleanUuid.isEmpty()) return false
         val tag = notificationTag("uuid:$cleanUuid")
-        val open = Intent(context, MainActivity::class.java).apply {
-            action = Intent.ACTION_MAIN
+        val open = openIntent(context, Intent.ACTION_MAIN).apply {
             identifier = tag
-            putExtra(IncomingPushReceiver.EXTRA_PUSH_CALL_UUID, cleanUuid)
-            putExtra(Intent.EXTRA_TITLE, caller)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra(EXTRA_CALL_UUID, cleanUuid)
         }
         return postCallNotification(context, tag, open, caller, quiet, stillRinging)
     }
@@ -49,16 +52,21 @@ object IncomingCallNotifications {
     /** Posts a `CATEGORY_CALL` incoming notification for an NLS URL-only BlueBubbles/Beeper alert. */
     fun postNlsUrlInvite(context: Context, url: String, caller: String?) {
         val cleanUrl = url.trim()
-        if (cleanUrl.isEmpty()) return
-        val open = Intent(context, MainActivity::class.java).apply {
-            action = Intent.ACTION_VIEW
-            data = cleanUrl.toUri()
-            putExtra(IncomingCallListenerService.EXTRA_INCOMING_CALL, true)
+        if (!UrlRouter.isFaceTimeRoomUrl(cleanUrl)) return
+        postCallNotification(context, notificationTag("url:$cleanUrl"), nlsOpenIntent(context, cleanUrl, caller), caller)
+    }
+
+    internal fun nlsOpenIntent(context: Context, url: String, caller: String?): Intent =
+        openIntent(context, Intent.ACTION_VIEW).apply {
+            data = url.toUri()
             putExtra(Intent.EXTRA_TITLE, caller)
+        }
+
+    private fun openIntent(context: Context, action: String): Intent =
+        Intent(action).apply {
+            component = notificationEntry(context)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
-        postCallNotification(context, notificationTag("url:$cleanUrl"), open, caller)
-    }
 
     /** Cancels a specific UUID-backed call notification. */
     fun cancelUuidInvite(context: Context, callUuid: String) {

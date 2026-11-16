@@ -7,15 +7,19 @@ import org.junit.Assert.assertTrue
 
 /** Capture destination is unique per executed runner invocation, never a reused screenshot pool. */
 object AuditEvidence {
-    private fun directory(): File {
+    private val routeClientUid = Regex("""\[CommunicationRouteClient: mUid: (\d+) mDevice:""")
+
+    private val runDirectory: File by lazy {
         val run = requireNotNull(InstrumentationRegistry.getArguments().getString("evidenceRun"))
         require(Regex("[a-z0-9-]+").matches(run))
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        return File(context.getExternalFilesDir(null), "journeys/$run").apply { mkdirs() }
+        val parent = File(requireNotNull(context.getExternalFilesDir(null)), "journeys")
+        check(parent.isDirectory || parent.mkdirs()) { "Cannot prepare evidence directory $parent" }
+        File(parent, run).apply { check(mkdir()) { "Evidence run directory already exists or cannot be created: $this" } }
     }
 
     fun recordText(name: String, value: String) {
-        File(directory(), "$name.txt").writeText(value)
+        newArtifact(name, "txt").writeText(value)
     }
 
     fun assertAudioClient(name: String, device: UiDevice, present: Boolean) {
@@ -31,15 +35,20 @@ object AuditEvidence {
         org.junit.Assert.assertEquals("Native client ownership for UID $uid", present, audioClients(diagnostic).contains(uid))
     }
 
-    private fun audioClients(diagnostic: String): String {
-        val marker = "Communication route clients:"
-        require(diagnostic.contains(marker))
-        return diagnostic.substringAfter(marker).substringBefore("Computed Preferred communication device:")
+    private fun audioClients(diagnostic: String): Set<String> {
+        val heading = "Communication route clients:"
+        val followingHeading = "Computed Preferred communication device:"
+        val section = diagnostic.indexOf(heading)
+        val end = diagnostic.indexOf(followingHeading, section + heading.length)
+        require(section >= 0 && end >= 0) { "Audio service did not report its communication route clients" }
+        return routeClientUid.findAll(diagnostic.substring(section + heading.length, end))
+            .map { it.groupValues[1] }
+            .toSet()
     }
 
     fun capturePipFrame(name: String, device: UiDevice, bounds: android.graphics.Rect): Boolean {
         capture(name, device)
-        val bitmap = requireNotNull(android.graphics.BitmapFactory.decodeFile(File(directory(), "$name.png").path))
+        val bitmap = requireNotNull(android.graphics.BitmapFactory.decodeFile(File(runDirectory, "$name.png").path))
         val area = android.graphics.Rect(bounds)
         require(area.intersect(0, 0, bitmap.width, bitmap.height))
         val colors = mutableSetOf<Int>()
@@ -59,8 +68,18 @@ object AuditEvidence {
     }
 
     fun capture(name: String, device: UiDevice) {
-        val directory = directory()
-        assertTrue(device.takeScreenshot(File(directory, "$name.png")))
-        device.dumpWindowHierarchy(File(directory, "$name.xml"))
+        val screenshot = newArtifact(name, "png")
+        assertTrue(device.takeScreenshot(screenshot))
+        check(screenshot.length() > 0) { "Empty screenshot: $screenshot" }
+        val tree = newArtifact(name, "xml")
+        device.dumpWindowHierarchy(tree)
+        check(tree.length() > 0) { "Empty UI hierarchy: $tree" }
+    }
+
+    private fun newArtifact(name: String, extension: String): File {
+        require(Regex("[a-z0-9][a-z0-9.-]*").matches(name))
+        return File(runDirectory, "$name.$extension").apply {
+            check(createNewFile()) { "Evidence artifact already exists: $this" }
+        }
     }
 }

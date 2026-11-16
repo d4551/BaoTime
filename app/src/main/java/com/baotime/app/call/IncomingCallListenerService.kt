@@ -74,7 +74,6 @@ class IncomingCallListenerService : NotificationListenerService() {
 
     companion object {
         const val CHANNEL_ID = "incoming_calls"
-        const val EXTRA_INCOMING_CALL = "com.baotime.app.extra.INCOMING_CALL"
         private val TEXT_KEYS = listOf(
             Notification.EXTRA_TITLE,
             Notification.EXTRA_TEXT,

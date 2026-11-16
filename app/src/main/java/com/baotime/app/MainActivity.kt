@@ -29,7 +29,6 @@ import com.baotime.app.call.CallSessionController
 import com.baotime.app.call.IncomingCallController
 import com.baotime.app.call.IncomingCallListenerService
 import com.baotime.app.call.IncomingCallNotifications
-import com.baotime.app.call.IncomingPushReceiver
 import com.baotime.app.config.AppConfig
 import com.baotime.app.data.CallHistory
 import com.baotime.app.data.ContactsCache
@@ -413,23 +412,12 @@ class MainActivity : ComponentActivity() {
     // ---- Incoming links ---------------------------------------------------------------
 
     private fun handleIncomingIntent(incoming: Intent?) {
-        val pushUuid = incoming?.getStringExtra(IncomingPushReceiver.EXTRA_PUSH_CALL_UUID)?.trim().orEmpty()
-        if (pushUuid.isNotEmpty()) {
-            IncomingCallNotifications.cancelUuidInvite(this, pushUuid)
-            sheets.dismiss()
-            incomingCalls.syncState(callLifecycle.state.value)
+        if (incoming != null && incoming.component == IncomingCallNotifications.notificationEntry(this)) {
+            handleCallNotificationIntent(incoming)
             return
         }
         when (val action = UrlRouter.routeIntent(incoming)) {
-            is RoutedAction.JoinFaceTimeWebLink -> {
-                if (incoming?.getBooleanExtra(IncomingCallListenerService.EXTRA_INCOMING_CALL, false) == true) {
-                    IncomingCallNotifications.cancelNlsUrlInvite(this, action.url)
-                    sheets.dismiss()
-                    incomingCalls.show(action)
-                } else {
-                    callLinks.joinIncomingWebLink(action)
-                }
-            }
+            is RoutedAction.JoinFaceTimeWebLink -> callLinks.joinIncomingWebLink(action)
             is RoutedAction.InitiateFaceTimeCall -> sheets.showNew(action.handle)
             is RoutedAction.OpenHome -> {
                 if (!action.prefillHandle.isNullOrBlank()) {
@@ -437,6 +425,26 @@ class MainActivity : ComponentActivity() {
                     UrlRouter.wholeFaceTimeUrl(action.prefillHandle)?.let { extracted ->
                         callLinks.openRecordedWebLink(extracted, getString(R.string.link_label))
                     }
+                }
+            }
+        }
+    }
+
+    private fun handleCallNotificationIntent(incoming: Intent) {
+        when (incoming.action) {
+            Intent.ACTION_MAIN -> {
+                val uuid = incoming.getStringExtra(IncomingCallNotifications.EXTRA_CALL_UUID)
+                    ?.trim()?.takeIf(String::isNotEmpty) ?: return
+                IncomingCallNotifications.cancelUuidInvite(this, uuid)
+                sheets.dismiss()
+                incomingCalls.syncState(callLifecycle.state.value)
+            }
+            Intent.ACTION_VIEW -> {
+                val action = UrlRouter.routeIntent(incoming)
+                if (action is RoutedAction.JoinFaceTimeWebLink) {
+                    IncomingCallNotifications.cancelNlsUrlInvite(this, action.url)
+                    sheets.dismiss()
+                    incomingCalls.show(action)
                 }
             }
         }

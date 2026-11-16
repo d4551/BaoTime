@@ -4,8 +4,14 @@ These are bounded source hints. Disabled contrast is a project criterion;
 actual blur, accessibility, focus and gestures still need device observations.
 """
 import re
+import xml.etree.ElementTree as ET
 
-from design_audit_core import MAIN, ROOT, block_after, calls, contrast_role, read, report, require, resolved_color, resources
+from design_audit_core import (
+    ANDROID, MAIN, ROOT, calls, contrast_role, kotlin_block, kotlin_code, read, report, require, resolved_color, resources,
+)
+
+BACKGROUND_ASSIGNMENT = re.compile(r"background`?\s*=")
+SHEET_BACKGROUND_ASSIGNMENT = re.compile(BACKGROUND_ASSIGNMENT.pattern + r"\s*`?theme`?\s*\.\s*`?surfaceDrawable")
 
 
 def check_contrast(palette, profile):
@@ -106,20 +112,26 @@ def check_references(kotlin, palettes, dimensions):
 
 
 def check_incoming_controls(source):
+    source = kotlin_code(source)
     controls = calls(source, "callControlButton")
     require(len(controls) == 2, "CONSUMERS", "Incoming has exactly two shared native controls")
-    for control in controls:
-        label = "Decline" if "ic_call_end" in control else "Accept"
-        fill = "colorDanger" if label == "Decline" else "colorBaoGreen"
+    for label, icon, fill in (("decline", "ic_call_end", "colorDanger"),
+                              ("accept", "ic_call_accept", "colorBaoGreen")):
+        binding = rf"\(\s*theme\s*,\s*R\.drawable\.{icon}\s*,\s*R\.string\.action_{label}\s*,\s*R\.string\.desc_{label}_call\s*,"
+        matches = [control for control in controls if re.search(binding, control)]
+        require(len(matches) == 1, "CONSUMERS", f"Incoming {label} has exactly one icon, title and accessibility binding")
+        control = "".join(matches)
         require(re.search(rf"bgColor\s*=\s*theme\.{fill}\b", control) is not None,
                 "CONSUMERS", f"Incoming {label} contrast model matches actual {fill} consumer")
         for role, color in (("captionColor", "colorCallText"), ("iconTint", "colorOnAccent")):
             require(re.search(rf"{role}\s*=\s*theme\.{color}\b", control) is not None,
                     "CONSUMERS", f"Incoming {label} {role} uses {color} against its actual circle or call surface")
-    require("ForegroundSurface.bind" in source, "CONSUMERS", "Incoming owns foreground focus and accessibility isolation")
+    require(bool(re.search(r"\bForegroundSurface\.bind\s*\(", source)),
+            "CONSUMERS", "Incoming owns foreground focus and accessibility isolation")
 
 
 def check_control_states(source):
+    source = kotlin_code(source)
     require(all(snippet in source for snippet in (
         "outlineFor(fillColor, colorFocus)", "outlineFor(fillColor, colorSelectedOutline)",
         "ColorUtils.compositeColors(fillColor, colorSurface)",
@@ -132,10 +144,10 @@ def check_control_states(source):
 
 def check_edge_painter(source):
     """Trace the actual native material painter and consumer; optical output needs device proof."""
-    painter = block_after(source, "private val edgePaint")
+    painter, _ = kotlin_block(source, "private val edgePaint", initializer="Paint")
     for snippet in ("color = theme.colorGlassHighlight", "style = android.graphics.Paint.Style.STROKE", "strokeWidth = theme.hairline.toFloat()"):
         require(snippet in painter, "MATERIAL", f"actual glass edge painter binds canonical input: {snippet}")
-    draw = block_after(source, "override fun draw")
+    draw, _ = kotlin_block(source, "override fun draw")
     for snippet in ("val inset = theme.hairline / 2f", "edgeRect.set(bounds.left + inset, bounds.top + inset, bounds.right - inset, bounds.bottom - inset)",
                     "canvas.drawRoundRect(edgeRect, radius - inset, radius - inset, edgePaint)", "if (!focused && radius > 0)"):
         require(snippet in draw, "MATERIAL", f"actual glass edge consumer retains bounds, radius, focus ownership and paint: {snippet}")
@@ -143,26 +155,44 @@ def check_edge_painter(source):
 
 def check_glass(palettes, kotlin):
     glass_path = MAIN / "java/com/baotime/app/ui/components/GlassNavigation.kt"
-    source = read(glass_path)
+    raw = read(glass_path)
+    source = kotlin_code(raw)
     root = read(MAIN / "java/com/baotime/app/ui/RootUi.kt")
-    settings = read(MAIN / "java/com/baotime/app/config/AppearancePreferences.kt")
-    check_edge_painter(source)
+    check_edge_painter(raw)
     for profile, palette in palettes.items():
         for name in ("color_glass_bar", "color_glass_sheet", "color_glass_call_bar", "color_glass_edge"):
             color = resolved_color(palette, name)
             require(color is not None and 0 < color[3] < 1, "MATERIAL", f"{profile} {name} is a valid nonzero translucent ARGB token")
         fallback = resolved_color(palette, "color_chrome_fallback")
         require(fallback is not None and fallback[3] == 1, "MATERIAL", f"{profile} navigation fallback is opaque")
+    check_glass_consumers(glass_path, kotlin, kotlin_code(root))
+    check_glass_renderer(source, raw)
+    check_glass_states(root, palettes)
+
+
+def check_glass_consumers(glass_path, kotlin, root):
     targets = re.findall(r"GlassNavigation\(theme,\s*scroll,\s*(\w+)\)", root)
     require(targets == ["this"],
             "MATERIAL", "tab material samples only the native ScrollView at its single canonical construction site")
-    consumers = {"RootUi.kt", "ModalSheetUi.kt", "CallOverlayUi.kt"}
+    ui = MAIN / "java/com/baotime/app/ui"
+    consumers = {ui / name for name in ("RootUi.kt", "ModalSheetUi.kt", "CallOverlayUi.kt")}
     for path in kotlin:
         text = read(path)
         if path != glass_path and "setRenderEffect(" in text:
             report("ERROR", "MATERIAL", f"RenderEffect outside canonical backdrop owner: {path.relative_to(ROOT)}")
-        if path.name not in consumers and path != glass_path and "GlassNavigation(" in text:
+        if path not in consumers and path != glass_path and "GlassNavigation(" in text:
             report("ERROR", "MATERIAL", f"unreviewed backdrop sampling consumer: {path.relative_to(ROOT)}")
+    modal = read(MAIN / "java/com/baotime/app/ui/ModalSheetUi.kt")
+    modal_code = kotlin_code(modal)
+    require("GlassNavigation(theme, source, scroll" in modal_code
+            and not any(SHEET_BACKGROUND_ASSIGNMENT.search(text) for text in (modal_code, modal)),
+            "MATERIAL", "visible sheet viewport owns direct glass without a second opaque card")
+    call = kotlin_code(read(MAIN / "java/com/baotime/app/ui/CallOverlayUi.kt"))
+    require("GlassNavigation(theme, web, toolbar" in call,
+            "MATERIAL", "call toolbar samples the room directly")
+
+
+def check_glass_renderer(source, raw):
     checks = (("source.draw(canvas)", "native scrolling content is the sampled draw source"),
               ("target.background = glass", "sampled material is the control's drawable background"),
               ("target.foreground = theme.glassControlForeground(radius)", "interaction ripple remains above the material"),
@@ -186,38 +216,42 @@ def check_glass(palettes, kotlin):
               ("glass.clear()", "detach releases sampled pixels"))
     for snippet, label in checks:
         require(snippet in source, "MATERIAL", label)
-    draw = block_after(source, "override fun draw")
+    draw, _ = kotlin_block(raw, "override fun draw")
     require("canvas.drawRoundRect(" in draw and "edgePaint)" in draw,
             "MATERIAL", "actual material draw invokes the canonical edge painter")
-    require("addView(" not in source, "MATERIAL", "material drawable adds no nested view hierarchy")
-    require("RenderNode" not in source and "setRenderEffect(" not in source and "renderscript" not in source,
+    require("addView(" not in raw, "MATERIAL", "material drawable adds no nested view hierarchy")
+    require("RenderNode" not in raw and "setRenderEffect(" not in raw and "renderscript" not in raw,
             "MATERIAL", "control content stays sharp without view effects or deprecated blur runtimes")
+    require("root.draw(" not in raw and "content.draw(" not in raw and "WebView" not in raw,
+            "MATERIAL", "sampler excludes its chrome, controls and WebView")
+    settings = kotlin_code(read(MAIN / "java/com/baotime/app/config/AppearancePreferences.kt"))
+    require(all(token in settings for token in ("SDK_INT < 31", "isPowerSaveMode", "contrast")),
+            "MATERIAL", "configuration owner handles API, power-save and contrast fallback")
+
+
+def check_glass_states(root, palettes):
     theme = read(MAIN / "java/com/baotime/app/ui/theme/BaoTimeTheme.kt")
-    foreground = block_after(theme, "fun glassControlForeground")
+    foreground, raw_foreground = kotlin_block(theme, "fun glassControlForeground")
     for state in ("state_enabled", "state_focused", "state_selected", "colorDisabledBackground", "colorFocus", "RippleDrawable"):
         require(state in foreground, "STATES", f"actual glass foreground owns {state}")
-    require("colorSelectedOutline" not in foreground, "STATES",
+    require("colorSelectedOutline" not in raw_foreground, "STATES",
             "selected glass tabs use text state without a nested capsule outline")
-    styling = block_after(root, "fun styleTabs")
-    require("setBackground" not in styling and "background =" not in styling and "button.isSelected" in styling,
+    styling, raw_styling = kotlin_block(root, "fun styleTabs")
+    require("button.isSelected" in styling and "setBackground" not in raw_styling
+            and not any(BACKGROUND_ASSIGNMENT.search(text) for text in (styling, raw_styling)),
             "STATES", "tab state updates retain installed glass background")
     for profile, palette in palettes.items():
         clear = resolved_color(palette, "color_control_clear")
         require(clear is not None and clear[3] == 0, "MATERIAL", f"{profile} foreground material fill remains transparent")
-    require("root.draw(" not in source and "content.draw(" not in source and "WebView" not in source,
-            "MATERIAL", "sampler excludes its chrome, controls and WebView")
-    require(all(token in settings for token in ("SDK_INT < 31", "isPowerSaveMode", "contrast")),
-            "MATERIAL", "configuration owner handles API, power-save and contrast fallback")
-    modal = read(MAIN / "java/com/baotime/app/ui/ModalSheetUi.kt")
-    require("GlassNavigation(theme, source, scroll" in modal and "background = theme.surfaceDrawable" not in modal,
-            "MATERIAL", "visible sheet viewport owns direct glass without a second opaque card")
-    call = read(MAIN / "java/com/baotime/app/ui/CallOverlayUi.kt")
-    require("GlassNavigation(theme, web, toolbar" in call,
-            "MATERIAL", "call toolbar samples the room directly")
 
 
 def check_manifest_parity():
-    manifest = read(MAIN / "AndroidManifest.xml")
+    manifest = ET.fromstring(read(MAIN / "AndroidManifest.xml"))
+    application = manifest.find("application")
+    for attribute, icon in (("icon", "@mipmap/ic_launcher"), ("roundIcon", "@mipmap/ic_launcher_round")):
+        require(application is not None and application.get(ANDROID + attribute) == icon,
+                "ICONS", f"manifest application {attribute} uses audited resource {icon}")
+    queries = {node.get(ANDROID + "name") for node in manifest.findall("./queries/package")}
     integration = read(MAIN / "java/com/baotime/app/system/SystemIntegration.kt")
     for package in re.findall(r'const val PACKAGE_[A-Z_]+ = "([^"]+)"', integration):
-        require(f'android:name="{package}"' in manifest, "DRY", f"manifest package visibility includes canonical {package}")
+        require(package in queries, "DRY", f"manifest package visibility includes canonical {package}")

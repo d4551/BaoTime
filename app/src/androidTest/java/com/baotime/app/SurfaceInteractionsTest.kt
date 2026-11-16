@@ -1,8 +1,10 @@
 package com.baotime.app
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Point
+import android.net.Uri
 import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
@@ -17,6 +19,9 @@ import androidx.test.uiautomator.Until
 import com.baotime.app.call.SharedPreferencesPushStore
 import com.baotime.app.config.AppConfig
 import com.baotime.app.config.PasswordRead
+import com.baotime.app.data.BaoCallRecord
+import com.baotime.app.data.CallHistoryCodec
+import org.json.JSONException
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -127,6 +132,40 @@ class SurfaceInteractionsTest {
         device.click(device.displayWidth / 2, device.displayHeight / 4)
         assertTrue(device.wait(Until.gone(By.desc(context.getString(R.string.desc_dismiss_sheet))), 5000))
         capture("scrim-dismissed")
+    }
+
+    @Test fun notificationRecipientIsPrivateAndTargetsTheSameActivity() {
+        val recipient = ComponentName(context, "${context.packageName}.IncomingCallNotification")
+        val resolved = requireNotNull(Intent().setComponent(recipient).resolveActivityInfo(context.packageManager, 0))
+        assertFalse(resolved.exported)
+        assertEquals(MainActivity::class.java.name, resolved.targetActivity)
+    }
+
+    @Test fun publicRoomWithWhitespaceTitleUsesTheDefaultLabel() {
+        context.startActivity(Intent(context, MainActivity::class.java).apply {
+            action = Intent.ACTION_VIEW
+            data = Uri.parse("https://facetime.apple.com/join#audit-default-title")
+            putExtra(Intent.EXTRA_TITLE, "   ")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+        val endCall = requireNotNull(device.wait(Until.findObject(By.desc(context.getString(R.string.desc_end_call))), 10000))
+        assertTrue(device.hasObject(By.text(context.getString(R.string.default_call_label))))
+        endCall.click()
+    }
+
+    @Test fun historyRejectsCoercionByAndroidJson() {
+        val valid = BaoCallRecord("ft_audit", "Audit caller", "audit", null, 42L, 0L, BaoCallRecord.TYPE_INCOMING, false)
+        val encoded = CallHistoryCodec.encode(listOf(valid))
+        assertEquals(listOf(valid), CallHistoryCodec.decode(encoded))
+        val invalidFields = mapOf("\"timestampMs\":42" to "\"timestampMs\":-0.25",
+            "\"callType\":1" to "\"callType\":4294967297",
+            "\"displayName\":\"Audit caller\"" to "\"displayName\":true",
+            "\"isFaceTime\":false" to "\"isFaceTime\":\"false\"")
+        for ((field, invalid) in invalidFields) {
+            val malformed = encoded.replace(field, invalid)
+            assertNotEquals(encoded, malformed)
+            assertThrows(field, JSONException::class.java) { CallHistoryCodec.decode(malformed) }
+        }
     }
 
     @Test fun setupValidSaveRetainsDraftAndSettingsReturn() {

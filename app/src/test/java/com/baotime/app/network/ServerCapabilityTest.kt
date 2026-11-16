@@ -67,6 +67,8 @@ class ServerCapabilityTest {
     fun isSupportedVersion_acceptsOnlyPinned1912AndNeverCrashes() {
         assertTrue(ServerCapability.isSupportedVersion("1.9.12"))
         assertTrue(ServerCapability.isSupportedVersion("v1.9.12"))
+        assertTrue(ServerCapability.isSupportedVersion(" V1.9.12 "))
+        assertFalse(ServerCapability.isSupportedVersion("01.09.012"))
         assertFalse(ServerCapability.isSupportedVersion("1.9.0"))
         assertFalse(ServerCapability.isSupportedVersion("1.9.9"))
         assertFalse(ServerCapability.isSupportedVersion("1.9.11"))

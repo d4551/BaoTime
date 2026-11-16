@@ -47,33 +47,37 @@ object CallHistoryCodec {
     }
 
     private fun readDisplayName(obj: JSONObject, key: String): String {
-        val name = obj.getString(key)
+        val name = readString(obj, key)
         if (name.isBlank()) throw JSONException("record displayName is blank")
         return name
     }
 
     private fun readFaceTimeUrl(obj: JSONObject, key: String): String? =
-        obj.getString(key).takeIf { it.isNotEmpty() }
+        readString(obj, key).takeIf { it.isNotEmpty() }
 
-    private fun readTimestamp(obj: JSONObject, key: String): Long {
-        val timestamp = obj.getLong(key)
-        if (timestamp < 0L) throw JSONException("record timestamp is negative")
-        return timestamp
-    }
+    private fun readString(obj: JSONObject, key: String): String =
+        obj.get(key) as? String ?: throw JSONException("record $key must be a string")
 
-    private fun readDuration(obj: JSONObject, key: String): Long {
-        val duration = obj.getLong(key)
-        if (duration < 0L) throw JSONException("record duration is negative")
-        return duration
+    private fun readBoolean(obj: JSONObject, key: String): Boolean =
+        obj.get(key) as? Boolean ?: throw JSONException("record $key must be a boolean")
+
+    private fun readNonnegativeLong(obj: JSONObject, key: String): Long {
+        val number = when (val value = obj.get(key)) {
+            is Int -> value.toLong()
+            is Long -> value
+            else -> throw JSONException("record $key must be a signed 64-bit integer")
+        }
+        if (number < 0L) throw JSONException("record $key is negative")
+        return number
     }
 
     private fun readCallType(obj: JSONObject, key: String): Int {
-        val type = obj.getInt(key)
-        when (type) {
-            BaoCallRecord.TYPE_INCOMING, BaoCallRecord.TYPE_OUTGOING, BaoCallRecord.TYPE_MISSED -> Unit
+        return when (readNonnegativeLong(obj, key)) {
+            BaoCallRecord.TYPE_INCOMING.toLong() -> BaoCallRecord.TYPE_INCOMING
+            BaoCallRecord.TYPE_OUTGOING.toLong() -> BaoCallRecord.TYPE_OUTGOING
+            BaoCallRecord.TYPE_MISSED.toLong() -> BaoCallRecord.TYPE_MISSED
             else -> throw JSONException("record callType is outside the contract")
         }
-        return type
     }
 
     private fun writeString(obj: JSONObject, key: String, value: String) {
@@ -107,16 +111,16 @@ object CallHistoryCodec {
         fun put(obj: JSONObject, record: BaoCallRecord) = writer(obj, key, value(record))
     }
 
-    private val ID = Field("id", BaoCallRecord::id, JSONObject::getString, ::writeString)
+    private val ID = Field("id", BaoCallRecord::id, ::readString, ::writeString)
     private val DISPLAY_NAME = Field("displayName", BaoCallRecord::displayName, ::readDisplayName, ::writeString)
     private val HANDLE_OR_NUMBER = Field(
-        "handleOrNumber", BaoCallRecord::handleOrNumber, JSONObject::getString, ::writeString
+        "handleOrNumber", BaoCallRecord::handleOrNumber, ::readString, ::writeString
     )
     private val FACE_TIME_URL = Field("faceTimeUrl", BaoCallRecord::faceTimeUrl, ::readFaceTimeUrl, ::writeFaceTimeUrl)
-    private val TIMESTAMP_MS = Field("timestampMs", BaoCallRecord::timestampMs, ::readTimestamp, ::writeLong)
-    private val DURATION_SEC = Field("durationSec", BaoCallRecord::durationSec, ::readDuration, ::writeLong)
+    private val TIMESTAMP_MS = Field("timestampMs", BaoCallRecord::timestampMs, ::readNonnegativeLong, ::writeLong)
+    private val DURATION_SEC = Field("durationSec", BaoCallRecord::durationSec, ::readNonnegativeLong, ::writeLong)
     private val CALL_TYPE = Field("callType", BaoCallRecord::callType, ::readCallType, ::writeInt)
-    private val IS_FACE_TIME = Field("isFaceTime", BaoCallRecord::isFaceTime, JSONObject::getBoolean, ::writeBoolean)
+    private val IS_FACE_TIME = Field("isFaceTime", BaoCallRecord::isFaceTime, ::readBoolean, ::writeBoolean)
 
     /** The persisted field set, expressed once: encode walks it, decode reads the same descriptors. */
     private val fields = listOf(

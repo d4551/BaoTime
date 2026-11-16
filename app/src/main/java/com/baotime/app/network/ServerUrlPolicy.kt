@@ -9,7 +9,7 @@ import java.net.URI
  * legitimate targets, so no address-family or DNS checks happen here. Saving must
  * not depend on the server being reachable; connectivity problems surface later
  * as typed server-status failures. Only the URL shape is validated: http(s)
- * scheme, a real host, and no embedded credentials.
+ * scheme, a real host, a valid port if specified, and no embedded credentials.
  */
 object ServerUrlPolicy {
 
@@ -37,6 +37,12 @@ object ServerUrlPolicy {
         if (parsed.host.isNullOrBlank()) {
             return Verdict.Invalid("URL has no host")
         }
+        if (!hasValidHttpPort(parsed)) {
+            return Verdict.Invalid("port must be between 1 and 65535")
+        }
         return Verdict.Valid(parsed.host.lowercase())
     }
+
+    internal fun hasValidHttpPort(uri: URI): Boolean =
+        if (uri.port == -1) uri.rawAuthority?.endsWith(':') == false else uri.port in 1..65535
 }

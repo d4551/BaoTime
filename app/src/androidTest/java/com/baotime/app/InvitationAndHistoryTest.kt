@@ -3,7 +3,6 @@ package com.baotime.app
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import androidx.core.content.edit
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -11,12 +10,14 @@ import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import com.baotime.app.call.CallLifecycleState
-import com.baotime.app.call.IncomingCallListenerService
+import com.baotime.app.call.IncomingCallNotifications
 import com.baotime.app.call.IncomingPushReceiver
 import com.baotime.app.call.SharedPreferencesPushStore
 import com.baotime.app.call.UnifiedPushRegistrar
+import com.baotime.app.data.BaoCallRecord
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -86,6 +87,16 @@ class InvitationAndHistoryTest {
     }
 
     @Test fun recordCopyShareDeleteAndClearConfirmation() {
+        val app = context.applicationContext
+        require(app is BaoTimeApp)
+        val retainedTitle = "Audit Retained"
+        runBlocking {
+            app.callHistory.clearAll()
+            app.callHistory.recordCall(retainedTitle, retainedTitle, null, BaoCallRecord.TYPE_OUTGOING)
+        }
+        val retainedRow = By.text(retainedTitle)
+        assertNotNull(device.wait(Until.findObject(retainedRow), 5000))
+
         context.startActivity(Intent(context, MainActivity::class.java).apply {
             action = Intent.ACTION_SEND
             type = "text/plain"
@@ -105,12 +116,15 @@ class InvitationAndHistoryTest {
         device.wait(Until.findObject(By.text("Audit Detail")), 5000).click()
         device.wait(Until.findObject(By.desc(context.getString(R.string.action_delete))), 5000).click()
         assertTrue(device.wait(Until.gone(By.text("Audit Detail")), 5000))
+        assertTrue(device.hasObject(retainedRow))
         device.findObject(By.desc(context.getString(R.string.action_clear_history))).click()
         device.wait(Until.findObject(By.text(context.getString(R.string.action_cancel))), 5000).click()
+        assertNotNull(device.wait(Until.findObject(retainedRow), 5000))
         assertTrue(device.findObject(By.desc(context.getString(R.string.action_clear_history))).isEnabled)
         device.findObject(By.desc(context.getString(R.string.action_clear_history))).click()
         device.wait(Until.findObject(By.text(context.getString(R.string.action_clear_history))), 5000).click()
         assertNotNull(device.wait(Until.findObject(By.text(context.getString(R.string.recents_empty))), 5000))
+        assertFalse(device.hasObject(retainedRow))
         assertFalse(device.findObject(By.desc(context.getString(R.string.action_clear_history))).isEnabled)
         capture("history-cleared-fixture-only")
     }
@@ -128,12 +142,14 @@ class InvitationAndHistoryTest {
         originalDistributor = pushPrefs.getString("distributor_package", null)
         pushFixtureRetained = true
         val payload = """{"type":"ft-call-status-changed","data":{"uuid":"audit-push-uuid-1","status_id":4,"status":"Incoming Call","handle":{"address":"Audit Push"}}}"""
-        val binding = requireNotNull(store.bind(app.appConfig.macBindingGeneration(), UnifiedPushRegistrar.NTFY_PACKAGE).current)
-        deliverPushBroadcast(Intent(context, IncomingPushReceiver::class.java).apply {
-            action = IncomingPushReceiver.ACTION_UNIFIED_PUSH_NEW_ENDPOINT
-            putExtra(UnifiedPushRegistrar.EXTRA_TOKEN, binding.token)
-            putExtra(IncomingPushReceiver.EXTRA_ENDPOINT, "https://ntfy.sh/baotime-audit?up=1")
-        })
+        val macGeneration = app.appConfig.macBindingGeneration()
+        store.bind(macGeneration, null)
+        val binding = requireNotNull(store.bind(macGeneration, UnifiedPushRegistrar.NTFY_PACKAGE).current)
+        val endpoint = "https://ntfy.sh/baotime-audit?up=1"
+        deliverEndpoint(binding.token, "https://ntfy.sh:65536/baotime-audit?up=1")
+        assertFalse(app.hasPushEndpoint())
+        assertFalse(app.pushEndpointAvailable.value)
+        deliverEndpoint(binding.token, endpoint)
         assertTrue(app.hasPushEndpoint())
         assertTrue(app.pushEndpointAvailable.value)
         deliverPushBroadcast(Intent(context, IncomingPushReceiver::class.java).apply {
@@ -162,7 +178,14 @@ class InvitationAndHistoryTest {
         capture("incoming-unified-push")
         device.findObject(By.desc(context.getString(R.string.desc_decline_call))).click()
         assertTrue(device.wait(Until.gone(By.desc(context.getString(R.string.desc_accept_call))), 5000))
-        store.bind(app.appConfig.macBindingGeneration(), null)
+        deliverPushBroadcast(Intent(IncomingPushReceiver.ACTION_UNIFIED_PUSH_UNREGISTERED)
+            .setClass(context, IncomingPushReceiver::class.java)
+            .putExtra(UnifiedPushRegistrar.EXTRA_TOKEN, binding.token))
+        assertFalse(app.hasPushEndpoint())
+        assertFalse(app.pushEndpointAvailable.value)
+        deliverEndpoint(binding.token, endpoint)
+        assertFalse(app.hasPushEndpoint())
+        store.bind(macGeneration, null)
         assertFalse(app.hasPushEndpoint())
         assertFalse(app.pushEndpointAvailable.value)
         val unboundPayload = """{"type":"ft-call-status-changed","data":{"uuid":"audit-push-uuid-2","status_id":4,"status":"Incoming Call","handle":{"address":"Audit Push Unbound"}}}"""
@@ -173,6 +196,13 @@ class InvitationAndHistoryTest {
         })
         assertFalse(app.callLifecycle.state.value is CallLifecycleState.Ringing)
         assertFalse(device.hasObject(By.text("Audit Push Unbound")))
+    }
+
+    private fun deliverEndpoint(token: String, endpoint: String) {
+        deliverPushBroadcast(Intent(IncomingPushReceiver.ACTION_UNIFIED_PUSH_NEW_ENDPOINT)
+            .setClass(context, IncomingPushReceiver::class.java)
+            .putExtra(UnifiedPushRegistrar.EXTRA_TOKEN, token)
+            .putExtra(IncomingPushReceiver.EXTRA_ENDPOINT, endpoint))
     }
 
     private fun deliverPushBroadcast(intent: Intent) {
@@ -195,13 +225,8 @@ class InvitationAndHistoryTest {
     }
 
     private fun invitation(id: String, title: String) {
-        context.startActivity(Intent(context, MainActivity::class.java).apply {
-            action = Intent.ACTION_VIEW
-            data = Uri.parse("https://facetime.apple.com/join#$id")
-            putExtra(Intent.EXTRA_TITLE, title)
-            putExtra(IncomingCallListenerService.EXTRA_INCOMING_CALL, true)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        })
+        context.startActivity(IncomingCallNotifications.nlsOpenIntent(context,
+            "https://facetime.apple.com/join#$id", title))
     }
 
     private fun capture(name: String) = AuditEvidence.capture(name, device)

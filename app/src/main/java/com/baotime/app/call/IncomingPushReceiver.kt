@@ -17,10 +17,7 @@ class IncomingPushReceiver : BroadcastReceiver() {
         app.onPushCallback(incomingToken, message = action == ACTION_UNIFIED_PUSH_MESSAGE) { revision ->
             when (action) {
                 ACTION_UNIFIED_PUSH_NEW_ENDPOINT -> {
-                    val endpoint = intent.getStringExtra(EXTRA_ENDPOINT) ?: return@onPushCallback
-                    if (UnifiedPushRegistrar.isNtfyEndpoint(endpoint)) {
-                        UnifiedPushRegistrar.onNewEndpoint(app.pushStore, incomingToken, endpoint)
-                    }
+                    UnifiedPushRegistrar.onNewEndpoint(app.pushStore, incomingToken, intent.getStringExtra(EXTRA_ENDPOINT))
                 }
                 ACTION_UNIFIED_PUSH_MESSAGE -> {
                     val rawPayload = extractPayloadString(intent) ?: return@onPushCallback
@@ -50,6 +47,5 @@ class IncomingPushReceiver : BroadcastReceiver() {
         const val EXTRA_BYTES_MESSAGE = "bytesMessage"
         const val EXTRA_MESSAGE = "message"
         const val EXTRA_ENDPOINT = "endpoint"
-        const val EXTRA_PUSH_CALL_UUID = "com.baotime.app.extra.PUSH_CALL_UUID"
     }
 }

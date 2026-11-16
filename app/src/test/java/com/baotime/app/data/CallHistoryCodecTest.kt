@@ -75,4 +75,33 @@ class CallHistoryCodecTest {
             CallHistoryCodec.decode(raw)
         }
     }
+
+    @Test
+    fun decode_rejectsNumericCoercionBeforeCheckingRange() {
+        val raw = CallHistoryCodec.encode(listOf(sampleRecord()))
+        for ((canonical, invalid) in listOf(
+            "1730000000000" to "-0.25",
+            "1730000000000" to "9223372036854775808",
+            "125" to "125.5",
+            "125" to "\"125\"",
+            "2" to "4294967297",
+            "2" to "3.99"
+        )) {
+            val field = when (canonical) {
+                "1730000000000" -> "timestampMs"
+                "125" -> "durationSec"
+                else -> "callType"
+            }
+            val malformed = raw.replace("\"$field\":$canonical", "\"$field\":$invalid")
+            assertThrows("$field must reject $invalid", JSONException::class.java) {
+                CallHistoryCodec.decode(malformed)
+            }
+        }
+    }
+
+    @Test
+    fun decode_preservesTheLargestWrittenLong() {
+        val boundary = sampleRecord().copy(timestampMs = Long.MAX_VALUE, durationSec = Long.MAX_VALUE)
+        assertEquals(listOf(boundary), CallHistoryCodec.decode(CallHistoryCodec.encode(listOf(boundary))))
+    }
 }

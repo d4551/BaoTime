@@ -53,15 +53,22 @@ class ContactDirectoryJourneysTest {
         instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.READ_CONTACTS)
     }
 
-    @After fun removeOnlyRecordedFixtures() {
+    @After fun closeOpenedActivity() {
         scenario?.close()
-        scenario = null
+    }
+
+    @After fun removeOnlyRecordedFixtures() {
         instrumentation.uiAutomation.dropShellPermissionIdentity()
         if (rawIds.isEmpty()) return
         instrumentation.uiAutomation.adoptShellPermissionIdentity(Manifest.permission.WRITE_CONTACTS)
-        rawIds.forEach { id -> context.contentResolver.delete(ContentUris.withAppendedId(ContactsContract.RawContacts.CONTENT_URI, id), null, null) }
-        instrumentation.uiAutomation.dropShellPermissionIdentity()
-        android.util.Log.i("BaoTimeJourney", "Removed only ${rawIds.size} owned contact fixtures; host restores original READ_CONTACTS after runner exits")
+        try {
+            val removed = rawIds.sumOf { id ->
+                context.contentResolver.delete(ContentUris.withAppendedId(ContactsContract.RawContacts.CONTENT_URI, id), null, null)
+            }
+            assertEquals("Every owned contact fixture was removed", rawIds.size, removed)
+        } finally {
+            instrumentation.uiAutomation.dropShellPermissionIdentity()
+        }
     }
 
     @Test fun completeAddressBookSearchFavoriteExpansionAndDial() {

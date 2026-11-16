@@ -8,6 +8,11 @@ ROOT = Path(__file__).resolve().parent.parent
 MAIN = ROOT / "app/src/main"
 ANDROID = "{http://schemas.android.com/apk/res/android}"
 FINDINGS = []
+KOTLIN_NON_CODE = re.compile(
+    r"""//[^\n]*|/\*|(?P<prefix>\${2,})?(?P<quote>"{3}|")|'(?:\\.|[^'\\\n])*'|`[^`\n]+`"""
+)
+KOTLIN_TEMPLATE_TOKEN = re.compile(KOTLIN_NON_CODE.pattern + r"|[{}]")
+BLOCK_COMMENT_DELIMITER = re.compile(r"/\*|\*/")
 
 
 def report(severity, category, message):
@@ -90,27 +95,109 @@ def contrast_role(palette, profile, foreground, background, backdrop, minimum, l
             f"({foreground} over {background} over {backdrop})")
 
 
+def kotlin_code(source):
+    """Mask Kotlin comments and literals without changing source offsets."""
+    chunks = []
+    cursor = 0
+    while token := KOTLIN_NON_CODE.search(source, cursor):
+        start = token.start()
+        end = kotlin_non_code_end(source, token)
+        chunks.append(source[cursor:start])
+        chunks.append(re.sub(r"[^\n]", " ", source[start:end]))
+        cursor = end
+    chunks.append(source[cursor:])
+    return "".join(chunks)
+
+
+def kotlin_non_code_end(source, token):
+    if token[0] == "/*":
+        return block_comment_end(source, token.end())
+    quote = token["quote"]
+    if quote is None:
+        return token.end()
+
+    template_open = (token["prefix"] or "$") + "{"
+    escape = r"\\[\s\S]|" if quote == '"' else ""
+    markers = re.compile(escape + re.escape(quote) + "|" + re.escape(template_open))
+    cursor = token.end()
+    while marker := markers.search(source, cursor):
+        if marker[0] == quote:
+            return marker.end()
+        if marker[0] == template_open:
+            cursor = kotlin_template_end(source, marker.end())
+        else:
+            cursor = marker.end()
+    return len(source)
+
+
+def kotlin_template_end(source, start):
+    depth = 1
+    cursor = start
+    while token := KOTLIN_TEMPLATE_TOKEN.search(source, cursor):
+        if token[0] in ("{", "}"):
+            depth += 1 if token[0] == "{" else -1
+            cursor = token.end()
+            if depth == 0:
+                return cursor
+        else:
+            cursor = kotlin_non_code_end(source, token)
+    return len(source)
+
+
+def block_comment_end(source, start):
+    depth = 1
+    for delimiter in BLOCK_COMMENT_DELIMITER.finditer(source, start):
+        depth += 1 if delimiter[0] == "/*" else -1
+        if depth == 0:
+            return delimiter.end()
+    return len(source)
+
+
 def calls(source, function):
     results = []
     for match in re.finditer(rf"\b{re.escape(function)}\s*\(", source):
-        start = match.start()
-        depth = 1
-        index = match.end()
-        while index < len(source) and depth:
-            depth += (source[index] == "(") - (source[index] == ")")
-            index += 1
-        results.append(source[start:index])
+        end = balanced_end(source, match.end() - 1, "()")
+        if end is not None:
+            results.append(source[match.start():end])
     return results
 
 
-def block_after(source, marker):
-    start = source.find(marker)
-    opening = source.find("{", start) if start >= 0 else -1
-    if opening < 0:
-        return ""
+def balanced_end(source, opening, delimiters):
+    left, right = delimiters
     depth = 1
-    end = opening + 1
-    while end < len(source) and depth:
-        depth += (source[end] == "{") - (source[end] == "}")
-        end += 1
-    return source[opening:end]
+    for index in range(opening + 1, len(source)):
+        depth += (source[index] == left) - (source[index] == right)
+        if depth == 0:
+            return index + 1
+    return None
+
+
+def kotlin_block(source, marker, *, initializer=None):
+    """Return the masked and original bodies of one named declaration."""
+    code = kotlin_code(source)
+    tokens = r"\s+".join(map(re.escape, marker.split()))
+    declarations = tuple(re.finditer(rf"\b{tokens}\b", code))
+    if len(declarations) != 1:
+        return "", ""
+    if initializer is None:
+        arguments = r"\s*\("
+        body = r"\s*(?::\s*[\w.]+\??\s*)?\{"
+    else:
+        constructor = rf"(?:\w+\s*\.\s*)*{re.escape(initializer)}"
+        arguments = rf"\s*(?::\s*{constructor}\s*)?=\s*{constructor}\s*\("
+        body = r"\s*\.\s*apply\s*\{"
+
+    args_open = re.compile(arguments).match(code, declarations[0].end())
+    if args_open is None:
+        return "", ""
+    args_end = balanced_end(code, args_open.end() - 1, "()")
+    if args_end is None:
+        return "", ""
+    body_open = re.compile(body).match(code, args_end)
+    if body_open is None:
+        return "", ""
+    opening = body_open.end() - 1
+    end = balanced_end(code, opening, "{}")
+    if end is None:
+        return "", ""
+    return code[opening:end], source[opening:end]

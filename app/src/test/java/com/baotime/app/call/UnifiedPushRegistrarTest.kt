@@ -13,51 +13,25 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.util.UUID
 
 class UnifiedPushRegistrarTest {
 
     private lateinit var server: MockWebServer
 
-    private class FakePushStore : PushRegistrationStore {
-        private var token: String? = null
+    private class FakePushStore(initialToken: String? = null) : PushRegistrationStore {
+        private var token = initialToken
         private var endpoint: String? = null
-        private var distributor: String? = null
 
         override fun currentToken(): String? = token
-
-        override fun getOrCreateToken(): String {
-            val current = token
-            if (!current.isNullOrBlank()) return current
-            val generated = UUID.randomUUID().toString()
-            token = generated
-            return generated
-        }
-
-        override fun adoptTokenIfAbsent(token: String) {
-            val clean = token.trim()
-            if (clean.isNotEmpty() && this.token == null) {
-                this.token = clean
-            }
-        }
-
         override fun currentEndpoint(): String? = endpoint
 
         override fun saveEndpoint(endpoint: String) {
-            val clean = endpoint.trim()
-            if (clean.isNotEmpty()) {
-                this.endpoint = clean
-            }
+            this.endpoint = endpoint
         }
 
         override fun clearEndpoint() {
+            token = null
             endpoint = null
-        }
-
-        override fun currentDistributor(): String? = distributor
-
-        override fun saveDistributor(packageName: String?) {
-            distributor = packageName?.trim()?.takeIf { it.isNotEmpty() }
         }
     }
 
@@ -73,39 +47,50 @@ class UnifiedPushRegistrarTest {
     }
 
     @Test
-    fun selectDistributor_excludesSelfPrefersBoundAndFallsBackToFirstAvailable() {
-        assertNull(
-            UnifiedPushRegistrar.selectDistributor(
-                candidates = listOf("com.baotime.app", " "),
-                selfPackage = "com.baotime.app",
-                preferredDistributor = null
-            )
+    fun connectorCallbacksRejectUnboundOrNonMatchingTokensAndInvalidEndpoints() {
+        val endpoint = "https://push.example/audit?up=1"
+        val replacement = "https://push.example/replacement?up=1"
+        val unboundStore = FakePushStore()
+        assertNull(UnifiedPushRegistrar.onNewEndpoint(unboundStore, "unknown", endpoint))
+        assertFalse(UnifiedPushRegistrar.onUnregistered(unboundStore, null))
+        assertNull(unboundStore.currentToken())
+        assertNull(unboundStore.currentEndpoint())
+
+        val token = "known-connector"
+        val store = FakePushStore(token)
+        assertEquals(endpoint, UnifiedPushRegistrar.onNewEndpoint(store, token, endpoint))
+        for (invalidToken in listOf(null, "", "$token ", "different")) {
+            assertNull(UnifiedPushRegistrar.onNewEndpoint(store, invalidToken, replacement))
+            assertFalse(UnifiedPushRegistrar.onUnregistered(store, invalidToken))
+            assertEquals(token, store.currentToken())
+            assertEquals(endpoint, store.currentEndpoint())
+        }
+
+        val invalidEndpoints = listOf(
+            null,
+            "",
+            " $replacement ",
+            "http://push.example/audit?up=1",
+            "https://push.example/audit",
+            "https://push.example/?up=1",
+            "https://push.example/audit?up=1#fragment",
+            "https://push.example:/audit?up=1",
+            "https://push.example:0/audit?up=1",
+            "https://push.example:65536/audit?up=1"
         )
-        assertEquals(
-            "io.heckel.ntfy",
-            UnifiedPushRegistrar.selectDistributor(
-                candidates = listOf("com.baotime.app", "org.unifiedpush.distributor.sunup", "io.heckel.ntfy"),
-                selfPackage = "com.baotime.app",
-                preferredDistributor = "io.heckel.ntfy"
-            )
-        )
-        assertEquals(
-            "org.unifiedpush.distributor.sunup",
-            UnifiedPushRegistrar.selectDistributor(
-                candidates = listOf("org.unifiedpush.distributor.sunup", "io.heckel.ntfy"),
-                selfPackage = "com.baotime.app",
-                preferredDistributor = "uninstalled.distributor"
-            )
-        )
+        for (invalidEndpoint in invalidEndpoints) {
+            assertNull(UnifiedPushRegistrar.onNewEndpoint(store, token, invalidEndpoint))
+            assertEquals(endpoint, store.currentEndpoint())
+        }
     }
 
     @Test
-    fun onNewEndpoint_adoptsTokenValidatesMatchAndRejectsRogueSender() {
-        val store = FakePushStore()
+    fun onNewEndpointStoresAndRotatesForTheRegisteredConnector() {
+        val store = FakePushStore("instance-token-1")
         val accepted = UnifiedPushRegistrar.onNewEndpoint(
             store = store,
             incomingToken = "instance-token-1",
-            rawEndpoint = "  https://ntfy.example/up/abc123?up=1  "
+            rawEndpoint = "https://ntfy.example/up/abc123?up=1"
         )
         assertEquals("https://ntfy.example/up/abc123?up=1", accepted)
         assertEquals("instance-token-1", store.currentToken())
@@ -115,7 +100,7 @@ class UnifiedPushRegistrarTest {
         val rejectedRogue = UnifiedPushRegistrar.onNewEndpoint(
             store = store,
             incomingToken = "rogue-token-999",
-            rawEndpoint = "https://attacker.invalid/up"
+            rawEndpoint = "https://ntfy.example/up/other?up=1"
         )
         assertNull(rejectedRogue)
         assertEquals("https://ntfy.example/up/abc123?up=1", store.currentEndpoint())
@@ -124,33 +109,34 @@ class UnifiedPushRegistrarTest {
         val rotated = UnifiedPushRegistrar.onNewEndpoint(
             store = store,
             incomingToken = "instance-token-1",
-            rawEndpoint = "https://ntfy.example/up/rotated-456?up=1"
+            rawEndpoint = "https://ntfy.example:65535/up/rotated-456?up=1"
         )
-        assertEquals("https://ntfy.example/up/rotated-456?up=1", rotated)
-        assertEquals("https://ntfy.example/up/rotated-456?up=1", store.currentEndpoint())
+        assertEquals("https://ntfy.example:65535/up/rotated-456?up=1", rotated)
+        assertEquals(rotated, store.currentEndpoint())
     }
 
     @Test
-    fun onUnregistered_clearsEndpointOnlyWhenTokenMatchesOrIsSingleInstance() {
-        val store = FakePushStore()
-        UnifiedPushRegistrar.onNewEndpoint(store, "instance-token-2", "https://up.example/token-2")
+    fun onUnregisteredClearsTheEndpointAndRetiresTheMatchingConnectorToken() {
+        val token = "instance-token-2"
+        val endpoint = "https://up.example/token-2?up=1"
+        val store = FakePushStore(token)
+        assertEquals(endpoint, UnifiedPushRegistrar.onNewEndpoint(store, token, endpoint))
 
         assertFalse(UnifiedPushRegistrar.onUnregistered(store, "wrong-token"))
-        assertEquals("https://up.example/token-2", store.currentEndpoint())
+        assertEquals(endpoint, store.currentEndpoint())
 
-        assertTrue(UnifiedPushRegistrar.onUnregistered(store, "instance-token-2"))
+        assertTrue(UnifiedPushRegistrar.onUnregistered(store, token))
         assertNull(store.currentEndpoint())
-
-        UnifiedPushRegistrar.onNewEndpoint(store, null, "https://up.example/default")
-        assertTrue(UnifiedPushRegistrar.onUnregistered(store, null))
+        assertNull(store.currentToken())
+        assertNull(UnifiedPushRegistrar.onNewEndpoint(store, token, endpoint))
         assertNull(store.currentEndpoint())
     }
 
     @Test
-    fun persistedEndpoint_reRegistersWhenServerConfigChangesAndPropagatesHttpFailure() = runBlocking {
-        val store = FakePushStore()
+    fun blueBubblesDeviceRegistrationUsesTheLatestConnectionAndPropagatesHttpFailure() = runBlocking {
+        val store = FakePushStore("tok-77")
         val endpoint = checkNotNull(
-            UnifiedPushRegistrar.onNewEndpoint(store, "tok-77", "https://push.example/up/77")
+            UnifiedPushRegistrar.onNewEndpoint(store, "tok-77", "https://push.example/up/77?up=1")
         )
 
         var revision = 1L
@@ -169,7 +155,7 @@ class UnifiedPushRegistrarTest {
         assertTrue(client.registerPushDevice("BaoTime Audit", endpoint))
         val firstReq = server.takeRequest()
         assertTrue(firstReq.path.orEmpty().contains("password=secret-one"))
-        assertTrue(firstReq.body.readUtf8().contains("\"identifier\":\"https://push.example/up/77\""))
+        assertTrue(firstReq.body.readUtf8().contains("\"identifier\":\"$endpoint\""))
 
         // User updates BlueBubbles password in Settings (revision 2): stored endpoint re-syncs to new server config
         revision = 2L

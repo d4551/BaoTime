@@ -17,6 +17,10 @@
 
 BaoTime is an Android app for joining FaceTime web rooms, creating shareable links through a Mac running BlueBubbles, and answering incoming invitations. It runs on Android 10 or later. You can join an existing link without a Mac connection.
 
+<p align="center">
+  <img src="assets/baotime-screens.gif" width="320" alt="BaoTime on Android, showing Recents and the New Call sheet">
+</p>
+
 ## ELI5
 
 - **Got a FaceTime link?** Open it in BaoTime on your Android phone. You can join without setting up a Mac.
@@ -72,36 +76,58 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 The app appears as **BaoTime** in the launcher. The Android package is `com.baotime.app`. On Windows, use `gradlew.bat`.
 
-<a name="verification-status"></a>
-
 ## Verify changes
 
 ```sh
 ./gradlew :app:test :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug
 python3 scripts/audit_design.py
+python3 -m unittest discover -s scripts -p 'test_*.py'
 ```
 
 The Gradle command runs JVM tests, builds the app and instrumentation APKs, and runs Android Lint. The Python audit checks design source and icon provenance.
 
-To audit the FaceTime WebView, open a room in a debuggable BaoTime build on a dedicated emulator. With Node.js 22 or later and `adb` on your PATH, run the following from the repository root. Substitute your emulator serial for `emulator-5554` and use a unique run ID for each scan.
+To audit the FaceTime WebView, install the current debug APK and open a synthetic test room on a dedicated emulator. Use a link and displayed data safe to retain in raw scan results and screenshots. With Node.js 22 or later and `adb` on your PATH, run the following from the repository root. Substitute your emulator serial for `emulator-5554` and use a unique run ID for each scan.
 
 ```sh
 npm --prefix scripts/axe ci --ignore-scripts
+node --test scripts/axe/run.test.mjs
 npm --prefix scripts/axe run audit -- emulator-5554 room-default
 npm --prefix scripts/axe run audit -- emulator-5554 room-full-catalog full-catalog
 ```
 
-Both scans save complete results under `build/reports/axe/` and exit with code 1 on violations. The full-catalog scan includes experimental rules. [axe-core 4.14.0 API](https://github.com/dequelabs/axe-core/blob/v4.14.0/doc/API.md)
+Both scans save complete results under `build/reports/axe/` and exit with code 1 on violations. They verify the installed build, document and rule inventory. The full-catalog scan includes experimental rules. Review incomplete results manually. Room-page coverage alone does not verify admission or media. [axe-core 4.14.0 API](https://github.com/dequelabs/axe-core/blob/v4.14.0/doc/API.md)
+
+Create a disposable Android 15 (API 35) emulator named `baotime_audit_20261107` in Android Studio's Device Manager. Keep personal data off this emulator. The native journeys change BaoTime permissions, insert and remove synthetic contacts, and exercise Android appearance settings. Reset the app fixture before each native run.
+
+```sh
+adb -s emulator-5554 install -r app/build/outputs/apk/debug/app-debug.apk
+adb -s emulator-5554 install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb -s emulator-5554 shell pm clear com.baotime.app
+python3 scripts/audit_device.py emulator-5554 native-audit native
+python3 scripts/audit_device.py emulator-5554 launcher-audit launcher
+```
+
+The device gate saves the raw AndroidJUnitRunner output and APK identity in `build/reports/device/`. It verifies both installed APKs, requires a successful result from each named test, and rejects incomplete or skipped runs even when `adb` exits zero.
 
 For [instrumented tests](app/src/androidTest/java/com/baotime/app/), select tests and runner arguments for the device you’re using.
 
 | Tests | Requirements |
 | --- | --- |
-| Native journeys, contacts, history, credential storage, and room UI | Dedicated audit emulator, `auditFixture=true`, and an `evidenceRun` of lowercase letters, digits, or hyphens |
+| Native journeys, contacts, history, credential storage, and room UI | API 35 AVD named `baotime_audit_20261107`, `auditFixture=true`, and an `evidenceRun` of lowercase letters, digits, or hyphens |
 | `InstalledLauncherTest` | `installationCheck=true` and `evidenceRun` |
 | `DeviceConnectionCheckTest` | Xiaomi deployment device, `deploymentCheck=true`, and `expectedServer` matching the Tailscale HTTPS URL in the local `filesDir/deployment-connection-input.json` fixture (**`NOT RUN`** in local emulator audits without that hardware) |
 
-Live two-way Apple-host FaceTime room admission and media verification likewise require an external Apple host and remain **`NOT RUN`** / externally blocked in local emulator audits.
+### Verification status
+
+The local audit on 2026-11-17 passed 72 JVM tests, 59 native journeys, the launcher check, 17 Python regression tests, 16 axe runner regression tests, and 693 design checks.
+
+- **WebView accessibility** — Both axe scans reported zero violations on the unavailable-room screen. The full-catalog scan flagged one Apple-rendered hidden button for manual review. [axe hidden-content rule](https://dequeuniversity.com/rules/axe/4.14/hidden-content)
+- **Emulator visuals** — Android status icons appeared clipped in the isolated API 35 room captures. The cause remains unverified.
+- **Live FaceTime** — Apple-host room admission and two-way audio and video remain **NOT RUN**. A live test needs an Apple host and an Android participant.
+- **Deployment** — The Xiaomi and Tailscale connection check remains **NOT RUN** in the emulator audit. It needs the deployment device and a reachable configured Mac.
+- **Source audit coverage** — Kotlin and Gradle inputs, including the wrapper JAR, are outside the remote scanner's coverage. The Android build, lint, JVM and native checks provide separate evidence for those surfaces.
+- **Android Lint** — The UnifiedPush receiver retains the `ExportedReceiver` warning. It receives distributor broadcasts and checks the current connector token before accepting a callback.
+- **Project license** — BaoTime's project license is unspecified. The [third-party notices](NOTICE) document upstream components.
 
 ## Architecture
 
@@ -280,7 +306,7 @@ sequenceDiagram
   NLS->>NLS: extract canonical https://facetime.apple.com URL
   alt First active source for this room
     NLS->>Notif: notifyIncomingCall (30s timeout, API 34+ FSI gate)
-    Notif->>App: VIEW intent + incoming extra
+    Notif->>App: VIEW intent through private notification alias
     App->>Life: onIncomingNlsUrl(url, caller, configGeneration)
     Life-->>User: Ringing (Accept or Decline)
     alt User taps Accept

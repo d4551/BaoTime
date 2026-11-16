@@ -116,9 +116,9 @@ object UrlRouter {
     fun routeIntent(intent: Intent?): RoutedAction {
         if (intent == null) return RoutedAction.OpenHome()
 
-        val callerExtra = intent.getStringExtra("caller")
-            ?: intent.getStringExtra("handle")
-            ?: intent.getStringExtra(Intent.EXTRA_TITLE)
+        val callerExtra = sequenceOf("caller", "handle", Intent.EXTRA_TITLE)
+            .mapNotNull { intent.getStringExtra(it)?.trim()?.takeIf(String::isNotEmpty) }
+            .firstOrNull()
         when (intent.action) {
             Intent.ACTION_VIEW, Intent.ACTION_DIAL, Intent.ACTION_CALL -> {
                 val dataUri = intent.data

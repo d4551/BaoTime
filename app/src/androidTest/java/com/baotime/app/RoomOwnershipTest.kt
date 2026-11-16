@@ -15,6 +15,9 @@ import android.webkit.WebView
 import android.widget.FrameLayout
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.runner.lifecycle.ActivityLifecycleCallback
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
@@ -30,6 +33,8 @@ import com.baotime.app.ui.MainTabsController
 import com.baotime.app.ui.SheetController
 import com.baotime.app.ui.theme.BaoTimeTheme
 import java.io.ByteArrayInputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -193,7 +198,7 @@ class RoomOwnershipTest {
         }
     }
 
-    @Test fun shippedRuntimeHasExactlyOneRoomWebViewOwnerClass() {
+    @Test fun shippedRoomHelperExistsAndRetiredRoomClassIsAbsent() {
         Class.forName("com.baotime.app.ui.FaceTimeWebViewHelper")
         assertThrows(ClassNotFoundException::class.java) {
             Class.forName("com.baotime.app.ui.FaceTimeWebRoom")
@@ -305,7 +310,7 @@ class RoomOwnershipTest {
     }
 
     @Test fun viewIntentRoomLinkOpensExactlyOneOwnedRoom() {
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        WarmIntentScenario().use { scenario ->
             openIntent(Intent(context, MainActivity::class.java).apply {
                 action = Intent.ACTION_VIEW
                 data = Uri.parse("https://facetime.apple.com/join#audit-view-intent")
@@ -325,7 +330,7 @@ class RoomOwnershipTest {
     }
 
     @Test fun urlExtraRoomLinkOpensExactlyOneOwnedRoom() {
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        WarmIntentScenario().use { scenario ->
             openIntent(Intent(context, MainActivity::class.java).apply {
                 putExtra("url", "https://facetime.apple.com/join#audit-url-extra")
             })
@@ -339,7 +344,7 @@ class RoomOwnershipTest {
     }
 
     @Test fun facetimeSchemeIntentPrefillsDialerWithoutOpeningRoom() {
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        WarmIntentScenario().use { scenario ->
             openIntent(Intent(context, MainActivity::class.java).apply {
                 action = Intent.ACTION_VIEW
                 data = Uri.parse("facetime://audit-scheme@example.invalid")
@@ -355,7 +360,7 @@ class RoomOwnershipTest {
     }
 
     @Test fun telIntentPrefillsDialerWithoutOpeningRoom() {
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        WarmIntentScenario().use { scenario ->
             openIntent(Intent(context, MainActivity::class.java).apply {
                 action = Intent.ACTION_DIAL
                 data = Uri.parse("tel:+12025550123")
@@ -372,7 +377,7 @@ class RoomOwnershipTest {
 
     @Test fun sharedTextAroundLinkPrefillsDialerInsteadOfOpeningRoom() {
         val shared = "Join here: https://facetime.apple.com/join#audit-shared-text"
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        WarmIntentScenario().use { scenario ->
             openIntent(Intent(context, MainActivity::class.java).apply {
                 action = Intent.ACTION_SEND
                 type = "text/plain"
@@ -389,24 +394,28 @@ class RoomOwnershipTest {
     }
 
     @Test fun blankShareIntentOpensNeitherDialerNorRoom() {
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        val blankShare = "   "
+        WarmIntentScenario().use { scenario ->
             openIntent(Intent(context, MainActivity::class.java).apply {
                 action = Intent.ACTION_SEND
                 type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, "   ")
+                putExtra(Intent.EXTRA_TEXT, blankShare)
             })
             assertNotNull(device.wait(Until.findObject(By.desc(context.getString(R.string.desc_new_call))), 10000))
             instrumentation.waitForIdleSync()
             assertFalse("A blank share never opens the dialer",
                 device.hasObject(By.desc(context.getString(R.string.desc_dismiss_sheet))))
             scenario.onActivity { activity ->
+                assertEquals(Intent.ACTION_SEND, activity.intent.action)
+                assertEquals("The existing activity received the blank share", blankShare,
+                    activity.intent.getStringExtra(Intent.EXTRA_TEXT))
                 assertTrue("A blank share never opens a room WebView", roomWebViews(activity).isEmpty())
             }
         }
     }
 
     @Test fun reopenedRoomAfterCloseIsAgainTheSoleOwnedWebView() {
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        WarmIntentScenario().use { scenario ->
             shareRoom("https://facetime.apple.com/join#audit-reopen-first")
             assertNotNull(device.wait(Until.findObject(By.desc(context.getString(R.string.desc_end_call))), 15000))
             var first: WebView? = null
@@ -430,7 +439,7 @@ class RoomOwnershipTest {
     }
 
     @Test fun roomWebViewClientsBelongToTheHelperOwnerUntilClose() {
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        WarmIntentScenario().use { scenario ->
             shareRoom("https://facetime.apple.com/join#audit-wiring")
             assertNotNull(device.wait(Until.findObject(By.desc(context.getString(R.string.desc_end_call))), 15000))
             var opened: WebView? = null
@@ -575,7 +584,7 @@ class RoomOwnershipTest {
     }
 
     @Test fun rejectedRoomUrlNeverCreatesOrDisplacesTheOwnedRoomWebView() {
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        WarmIntentScenario().use { scenario ->
             scenario.onActivity { activity ->
                 val sessions = requireNotNull(delegateValue(activity, "callSessions"))
                 require(sessions is CallSessionController)
@@ -606,7 +615,7 @@ class RoomOwnershipTest {
     }
 
     @Test fun oneRoomWebViewSurvivesRotationAndIsReplacedNotStacked() {
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        WarmIntentScenario().use { scenario ->
             shareRoom("https://facetime.apple.com/join#audit-owner-first")
             assertNotNull(device.wait(Until.findObject(By.desc(context.getString(R.string.desc_end_call))), 15000))
             var opened: WebView? = null
@@ -664,7 +673,7 @@ class RoomOwnershipTest {
             Configuration.UI_MODE_NIGHT_YES) "yes" else "no"
         originalNightMode = night
         val target = if (night == "yes") "no" else "yes"
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        WarmIntentScenario().use { scenario ->
             assertNotNull(device.wait(Until.findObject(By.desc(context.getString(R.string.desc_new_call))), 10000))
             device.executeShellCommand("cmd uimode night $target")
             instrumentation.waitForIdleSync()
@@ -682,6 +691,44 @@ class RoomOwnershipTest {
             }
             device.findObject(By.desc(context.getString(R.string.desc_end_call))).click()
             assertTrue(device.wait(Until.gone(By.desc(context.getString(R.string.desc_end_call))), 5000))
+        }
+    }
+
+    // ActivityScenario matches lifecycle events against the launch intent. Warm delivery replaces
+    // MainActivity's intent, so these journeys follow the launched instance through destruction.
+    private inner class WarmIntentScenario : AutoCloseable {
+        private val monitor = ActivityLifecycleMonitorRegistry.getInstance()
+        private val activity = instrumentation.startActivitySync(
+            Intent(context, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        ).let {
+            check(it is MainActivity)
+            it
+        }
+
+        fun onActivity(assertion: (MainActivity) -> Unit) {
+            instrumentation.runOnMainSync {
+                assertEquals("The original activity still owns the foreground", Stage.RESUMED,
+                    monitor.getLifecycleStageOf(activity))
+                assertion(activity)
+            }
+        }
+
+        override fun close() {
+            val destroyed = CountDownLatch(1)
+            val callback = ActivityLifecycleCallback { changed, stage ->
+                if (changed === activity && stage == Stage.DESTROYED) destroyed.countDown()
+            }
+            try {
+                instrumentation.runOnMainSync {
+                    monitor.addLifecycleCallback(callback)
+                    if (activity.isDestroyed) destroyed.countDown()
+                    else activity.finishAndRemoveTask()
+                }
+                assertTrue("The warm-intent activity was destroyed", destroyed.await(10, TimeUnit.SECONDS))
+            } finally {
+                instrumentation.runOnMainSync { monitor.removeLifecycleCallback(callback) }
+            }
         }
     }
 
@@ -708,7 +755,7 @@ class RoomOwnershipTest {
         instrumentation.waitForIdleSync()
     }
 
-    private fun awaitReplacementRoom(scenario: ActivityScenario<MainActivity>, previous: WebView): WebView {
+    private fun awaitReplacementRoom(scenario: WarmIntentScenario, previous: WebView): WebView {
         val deadline = SystemClock.uptimeMillis() + 10000L
         while (SystemClock.uptimeMillis() < deadline) {
             var candidate: WebView? = null
