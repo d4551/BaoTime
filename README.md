@@ -28,6 +28,10 @@ BaoTime is an Android app for joining FaceTime web rooms, creating shareable lin
 
 </details>
 
+## Sponsor
+
+[![Oyatsu](assets/oyatsu-logo.png)](https://oyatsu.ai/)
+
 ## ELI5
 
 - **Got a FaceTime link?** Open it in BaoTime on your Android phone. You can join without setting up a Mac.
