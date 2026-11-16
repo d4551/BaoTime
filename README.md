@@ -1,3 +1,5 @@
+[Say Hi To Dr. B On LinkedIn](https://www.linkedin.com/in/stracos)
+
 # BaoTime
 
 [![Version 1.1.0](https://img.shields.io/badge/version-1.1.0-087535)](#build-and-install)
