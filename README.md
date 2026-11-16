@@ -17,9 +17,14 @@
 
 BaoTime is an Android app for joining FaceTime web rooms, creating shareable links through a Mac running BlueBubbles, and answering incoming invitations. It runs on Android 10 or later. You can join an existing link without a Mac connection.
 
-<p align="center">
-  <img src="assets/baotime-screens.gif" width="320" alt="BaoTime on Android, showing Recents and the New Call sheet">
-</p>
+<details open>
+<summary>Android feature walkthrough</summary>
+
+[![BaoTime walkthrough showing link creation and joining, incoming invitations, room controls, picture-in-picture, Contacts, Recents, and Settings](assets/baotime-screens.gif)](assets/baotime-screens.gif)
+
+[Open the animated GIF](assets/baotime-screens.gif)
+
+</details>
 
 ## ELI5
 
