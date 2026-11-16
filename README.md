@@ -2,6 +2,10 @@
 
 # BaoTime
 
+**[Download BaoTime for Android](https://github.com/d4551/BaoTime/releases/latest/download/BaoTime.apk)** · Android 10 or newer
+
+Open the downloaded APK and follow Android’s installation prompts. For updates, download the APK again and install it over your current GitHub release.
+
 [![Version 1.1.0](https://img.shields.io/badge/version-1.1.0-087535)](#build-and-install)
 [![minSdk 29](https://img.shields.io/badge/minSdk-29-3DDC84?logo=android&logoColor=white)](#build-and-install)
 [![targetSdk / compileSdk 37](https://img.shields.io/badge/targetSdk%20%2F%20compileSdk-37-3DDC84?logo=android&logoColor=white)](#build-and-install)
@@ -19,14 +23,11 @@
 
 BaoTime is an Android app for joining FaceTime web rooms, creating shareable links through a Mac running BlueBubbles, and answering incoming invitations. It runs on Android 10 or later. You can join an existing link without a Mac connection.
 
-<details open>
-<summary>Android feature walkthrough</summary>
+## Android feature walkthrough
 
-[![BaoTime walkthrough showing link creation and joining, incoming invitations, room controls, picture-in-picture, Contacts, Recents, and Settings](assets/baotime-screens.gif)](assets/baotime-screens.gif)
+![BaoTime walkthrough showing link creation and joining, incoming invitations, room controls, picture-in-picture, Contacts, Recents, and Settings](assets/baotime-screens.gif)
 
-[Open the animated GIF](assets/baotime-screens.gif)
-
-</details>
+If the animation is paused, choose **Play** or [open the GIF directly](https://raw.githubusercontent.com/d4551/BaoTime/main/assets/baotime-screens.gif).
 
 ## ELI5
 
@@ -67,6 +68,8 @@ BaoTime generates and stores a connector token before contacting a UnifiedPush d
 For webhook delivery, install and open [ntfy for Android](https://docs.ntfy.sh/subscribe/phone/), enable UnifiedPush in ntfy, and choose an HTTPS ntfy server you trust with caller information. Enable FaceTime calling in BlueBubbles and save the Mac connection in BaoTime. Open **Settings → Background invitations → Copy webhook URL**. Add the copied URL in **BlueBubbles → Webhooks**, selecting only **FaceTime Call Status Changed (Experimental)**. Keep the URL private. The copied URL disables ntfy message caching, so a disconnected distributor can miss an invitation. After changing to another Mac, copy its new URL and remove the old webhook from the previous Mac. A password change at the same server address keeps the existing URL. [BlueBubbles webhook setup](https://docs.bluebubbles.app/client/usage-guides/using-unified-push-for-notifications) · [ntfy UnifiedPush publishing](https://docs.ntfy.sh/publish/#unifiedpush)
 
 ## Build and install
+
+To switch from a debug build to the signed GitHub release, uninstall the debug build first. Uninstalling erases saved settings and call history.
 
 Install the **Android 17 SDK** (`platforms;android-37.0`) and Android SDK Platform-Tools. Set `ANDROID_HOME` or let Android Studio create `local.properties` with `sdk.dir`. [Android 17 SDK setup](https://developer.android.com/about/versions/17/setup-sdk)
 
