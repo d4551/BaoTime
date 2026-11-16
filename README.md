@@ -1,4 +1,4 @@
-[Say Hi To Dr. B On LinkedIn](https://www.linkedin.com/in/stracos)
+[Say Hi To Dr. B On LinkedIn](https://www.linkedin.com/in/stracos) · <a href="https://oyatsu.ai/"><img src="assets/oyatsu-logo.png" width="18" height="18" alt=""> Oyatsu AI</a>
 
 # BaoTime
 
@@ -27,10 +27,6 @@ BaoTime is an Android app for joining FaceTime web rooms, creating shareable lin
 [Open the animated GIF](assets/baotime-screens.gif)
 
 </details>
-
-## Sponsor
-
-[![Oyatsu](assets/oyatsu-logo.png)](https://oyatsu.ai/)
 
 ## ELI5
 
